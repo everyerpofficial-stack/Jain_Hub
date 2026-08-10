@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter, DialogHeader } from "@/components/ui/dialog";
-import { Search, Plus, Edit, Trash2, ShoppingBag, Landmark, ArrowDownLeft, AlertCircle } from "lucide-react";
+import { Search, Plus, Edit, Trash2, ShoppingBag, Landmark, ArrowDownLeft, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
 import { useMobileStore, MobileAccessory } from "@/lib/mobileStore";
+import { triggerManualSync } from "@/lib/useRealtimeSync";
 
 export const Route = createFileRoute("/mobiles/accessories")({
   head: () => ({
@@ -41,15 +42,15 @@ function AccessoryFormDialog({
     }
   });
 
-  const canSubmit = name.trim() && stock && purchasePrice;
+  const canSubmit = name.trim() && stock && purchasePrice && Number(stock) > 0 && Number(purchasePrice) >= 0;
 
   const handleSave = () => {
     const data = {
       name: name.trim(),
       category: category.trim() || "Other",
-      stock: Number(stock),
+      stock: Math.min(999999, Math.max(0, Number(stock))),
       minLimit: 0,
-      purchasePrice: Number(purchasePrice),
+      purchasePrice: Math.min(99999999, Math.max(0, Number(purchasePrice))),
       sellingPrice: 0
     };
 
@@ -80,7 +81,7 @@ function AccessoryFormDialog({
             <span className="text-xs font-semibold text-muted-foreground">Accessory Item Name</span>
             <input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => setName(e.target.value.slice(0, 100))}
               placeholder="e.g. Apple 20W Power Adapter"
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
             />
@@ -90,7 +91,7 @@ function AccessoryFormDialog({
             <span className="text-xs font-semibold text-muted-foreground">Category Name (Manual)</span>
             <input
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => setCategory(e.target.value.slice(0, 50))}
               placeholder="e.g. Charger, Case, Screen Guard"
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
             />
@@ -101,8 +102,10 @@ function AccessoryFormDialog({
               <span className="text-xs font-semibold text-muted-foreground">Initial Stock</span>
               <input
                 type="number"
+                min="1"
+                max="999999"
                 value={stock}
-                onChange={(e) => setStock(e.target.value)}
+                onChange={(e) => setStock(e.target.value.slice(0, 6))}
                 placeholder="10"
                 className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
               />
@@ -111,8 +114,10 @@ function AccessoryFormDialog({
               <span className="text-xs font-semibold text-muted-foreground">Cost Price (₹)</span>
               <input
                 type="number"
+                min="0"
+                max="99999999"
                 value={purchasePrice}
-                onChange={(e) => setPurchasePrice(e.target.value)}
+                onChange={(e) => setPurchasePrice(e.target.value.slice(0, 8))}
                 placeholder="1000"
                 className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
               />
@@ -163,11 +168,13 @@ function SellAccessoryDialog({
       return;
     }
     sellAccessory(accessory.id, sellQty);
-    toast.success(`Sold ${sellQty} unit(s) of ${accessory.name} for ₹${sellPrice * sellQty}`);
+    const totalCalc = sellPrice * sellQty;
+    toast.success(`Sold ${sellQty} unit(s) of ${accessory.name} for ₹${isFinite(totalCalc) ? totalCalc.toLocaleString("en-IN") : totalCalc}`);
     onClose();
   };
 
-  const cost = (Number(price) || 0) * (Number(qty) || 0);
+  const rawCost = (Number(price) || 0) * (Number(qty) || 0);
+  const cost = isFinite(rawCost) && rawCost >= 0 && rawCost < 1e12 ? rawCost : 0;
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
@@ -195,7 +202,10 @@ function SellAccessoryDialog({
               min="1"
               max={accessory.stock}
               value={qty}
-              onChange={(e) => setQty(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value.slice(0, 6);
+                setQty(val);
+              }}
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
             />
           </label>
@@ -204,8 +214,13 @@ function SellAccessoryDialog({
             <span className="text-xs font-semibold text-muted-foreground">Selling Price (₹)</span>
             <input
               type="number"
+              min="0"
+              max="99999999"
               value={price}
-              onChange={(e) => setPrice(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value.slice(0, 8);
+                setPrice(val);
+              }}
               placeholder="e.g. 1200"
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
             />
@@ -213,7 +228,9 @@ function SellAccessoryDialog({
 
           <div className="flex justify-between items-center text-xs border-t border-border pt-3">
             <span className="text-muted-foreground font-semibold">Total Price:</span>
-            <span className="text-base font-extrabold text-success">₹{cost.toLocaleString("en-IN")}</span>
+            <span className="text-base font-extrabold text-success truncate max-w-[200px] inline-block text-right" title={`₹${cost.toLocaleString("en-IN")}`}>
+              ₹{cost.toLocaleString("en-IN")}
+            </span>
           </div>
         </div>
 
@@ -227,7 +244,7 @@ function SellAccessoryDialog({
           <button
             disabled={!qty || Number(qty) <= 0 || Number(qty) > accessory.stock || !price || Number(price) <= 0}
             onClick={handleCheckout}
-            className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-all ml-auto animate-pulse"
+            className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-all ml-auto"
           >
             Record Sale
           </button>
@@ -246,6 +263,24 @@ function AccessoriesPage() {
   const [isAdding, setIsAdding] = useState(false);
   const [editing, setEditing] = useState<MobileAccessory | null>(null);
   const [selling, setSelling] = useState<MobileAccessory | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    toast.info("Syncing accessories from Google Sheets...");
+    try {
+      const ok = await triggerManualSync(true);
+      if (ok) {
+        toast.success("Accessories inventory updated");
+      } else {
+        toast.error("Could not sync with Google Sheets.");
+      }
+    } catch {
+      toast.error("Failed to sync accessories");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const filtered = accessories.filter((a) => {
     if (selectedCategoryTab !== "All" && a.category !== selectedCategoryTab) return false;
@@ -286,6 +321,15 @@ function AccessoriesPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="h-9 px-3.5 rounded-md border border-border text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-accent transition-colors shadow-sm disabled:opacity-50"
+            title="Refresh accessories from Google Sheets"
+          >
+            <RefreshCw className={`size-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing..." : "Sync Inventory"}
+          </button>
           <button
             onClick={() => setIsAdding(true)}
             className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity"

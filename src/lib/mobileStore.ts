@@ -409,6 +409,7 @@ export const useMobileStore = create<MobilesState>()(
           products: [...state.products, newProduct],
           inventory: [...state.inventory, newInvItem]
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate product add sync failed:", err));
       },
 
       updateProduct: (id, updatedFields) => {
@@ -433,6 +434,7 @@ export const useMobileStore = create<MobilesState>()(
           });
           return { products, inventory };
         });
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate product update sync failed:", err));
       },
 
       deleteProduct: (id) => {
@@ -440,6 +442,7 @@ export const useMobileStore = create<MobilesState>()(
           products: state.products.filter((p) => p.id !== id),
           inventory: state.inventory.filter((inv) => inv.productId !== id)
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate product delete sync failed:", err));
       },
 
       adjustStock: (productId, qtyChange) => {
@@ -483,16 +486,19 @@ export const useMobileStore = create<MobilesState>()(
         const id = "MS-" + (get().suppliers.length + 1).toString().padStart(3, "0");
         const newSupplier: MobileSupplier = { ...s, id, outstanding: 0 };
         set((state) => ({ suppliers: [...state.suppliers, newSupplier] }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier add sync failed:", err));
       },
 
       updateSupplier: (id, updatedFields) => {
         set((state) => ({
           suppliers: state.suppliers.map((s) => (s.id === id ? { ...s, ...updatedFields } : s))
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier update sync failed:", err));
       },
 
       deleteSupplier: (id) => {
         set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id) }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier delete sync failed:", err));
       },
 
       paySupplier: (id, amount, date, remark, paymentMode = "Cash", cashAmount, bankAmount) => {
@@ -515,6 +521,7 @@ export const useMobileStore = create<MobilesState>()(
           ),
           supplierPayments: [newPayment, ...(state.supplierPayments || [])]
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier payment sync failed:", err));
       },
 
       recordPurchase: (pur) => {
@@ -586,6 +593,7 @@ export const useMobileStore = create<MobilesState>()(
           purchases: [newPurchase, ...state.purchases]
         }));
 
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate purchase sync failed:", err));
         return newPurchase;
       },
 
@@ -642,6 +650,7 @@ export const useMobileStore = create<MobilesState>()(
           sales: [newSale, ...state.sales]
         }));
 
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate sale sync failed:", err));
         return newSale;
       },
 
@@ -676,6 +685,7 @@ export const useMobileStore = create<MobilesState>()(
           action: "COLLECT_SALE_DUE",
           target: `Collected ₹${amount} (${paymentMethod}) for Bill ${saleId} from ${sale.customerName}. Remaining Due: ₹${newDueAmount}`,
         });
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate sale payment sync failed:", err));
       },
 
       addCustomer: (c) => {
@@ -683,6 +693,7 @@ export const useMobileStore = create<MobilesState>()(
         const registeredDate = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
         const newCustomer: MobileCustomer = { ...c, id, registeredDate };
         set((state) => ({ customers: [...state.customers, newCustomer] }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate customer add sync failed:", err));
         return newCustomer;
       },
 
@@ -690,10 +701,12 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           customers: state.customers.map((c) => (c.id === id ? { ...c, ...updatedFields } : c))
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate customer update sync failed:", err));
       },
 
       deleteCustomer: (id) => {
         set((state) => ({ customers: state.customers.filter((c) => c.id !== id) }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate customer delete sync failed:", err));
       },
 
       addImei: (imei) => {
@@ -712,6 +725,7 @@ export const useMobileStore = create<MobilesState>()(
         const id = "MA-" + (get().accessories.length + 1).toString().padStart(3, "0");
         const newAccessory: MobileAccessory = { ...a, id, status: getQtyStatus(a.stock, a.minLimit) };
         set((state) => ({ accessories: [...state.accessories, newAccessory] }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory sync failed:", err));
       },
 
       updateAccessory: (id, updatedFields) => {
@@ -729,10 +743,12 @@ export const useMobileStore = create<MobilesState>()(
             return a;
           })
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory update sync failed:", err));
       },
 
       deleteAccessory: (id) => {
         set((state) => ({ accessories: state.accessories.filter((a) => a.id !== id) }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory delete sync failed:", err));
       },
 
       sellAccessory: (id, qty) => {
@@ -745,6 +761,7 @@ export const useMobileStore = create<MobilesState>()(
             return a;
           })
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory sell sync failed:", err));
       },
 
       addWarrantyClaim: (w) => {
@@ -752,12 +769,14 @@ export const useMobileStore = create<MobilesState>()(
         const claimDate = new Date().toISOString().split("T")[0];
         const newClaim: MobileWarrantyClaim = { ...w, id, claimDate, status: "Pending" };
         set((state) => ({ warranties: [...state.warranties, newClaim] }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate warranty sync failed:", err));
       },
 
       updateWarrantyStatus: (id, status) => {
         set((state) => ({
           warranties: state.warranties.map((w) => (w.id === id ? { ...w, status } : w))
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate warranty status sync failed:", err));
       },
 
       updateSettings: (updatedSettings) => {
@@ -786,6 +805,7 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           expenses: [newExpense, ...state.expenses]
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate expense sync failed:", err));
         return newExpense;
       },
 
@@ -793,6 +813,7 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           expenses: state.expenses.filter((e) => e.id !== id)
         }));
+        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate expense delete sync failed:", err));
       },
 
       resetAll: () => {
@@ -822,6 +843,8 @@ export const useMobileStore = create<MobilesState>()(
             writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", []),
             writeSheet(sheetsConfig.url, "Mobiles_Customers", []),
             writeSheet(sheetsConfig.url, "Mobiles_Products", []),
+            writeSheet(sheetsConfig.url, "Mobiles_Accessories", []),
+            writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", []),
           ]).catch(() => {/* silent — best effort */});
         }
       },
@@ -829,7 +852,7 @@ export const useMobileStore = create<MobilesState>()(
       updateSheetsConfig: (cfg) => set((s) => ({ sheetsConfig: { ...s.sheetsConfig, ...cfg } })),
 
       syncToSheets: async () => {
-        const { sheetsConfig, sales, purchases, expenses, suppliers, supplierPayments, customers, products } = get();
+        const { sheetsConfig, sales, purchases, expenses, suppliers, supplierPayments, customers, products, accessories, warranties } = get();
         if (!sheetsConfig.enabled || !sheetsConfig.url) {
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
@@ -886,6 +909,17 @@ export const useMobileStore = create<MobilesState>()(
             color: p.color, ramRom: p.ramRom, category: p.category,
             purchasePrice: p.purchasePrice, sellingPrice: p.sellingPrice ?? 0, status: p.status,
           })));
+          await writeSheet(sheetsConfig.url, "Mobiles_Accessories", accessories.map((a) => ({
+            id: a.id, name: a.name, category: a.category,
+            stock: a.stock, minLimit: a.minLimit,
+            purchasePrice: a.purchasePrice, sellingPrice: a.sellingPrice,
+            status: a.status,
+          })));
+          await writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", warranties.map((w) => ({
+            id: w.id, customerName: w.customerName, mobile: w.mobile,
+            productName: w.productName, imei: w.imei, claimDate: w.claimDate,
+            issueDescription: w.issueDescription, status: w.status,
+          })));
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -900,12 +934,16 @@ export const useMobileStore = create<MobilesState>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          const [salesRows, expRows, supRows, supPayRows, custRows] = await Promise.all([
+          const [salesRows, expRows, supRows, supPayRows, custRows, prodRows, purRows, accRows, warRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Mobiles_Sales"),
             readSheet(sheetsConfig.url, "Mobiles_Expenses"),
             readSheet(sheetsConfig.url, "Mobiles_Suppliers"),
             readSheet(sheetsConfig.url, "Mobiles_SupplierPayments"),
             readSheet(sheetsConfig.url, "Mobiles_Customers"),
+            readSheet(sheetsConfig.url, "Mobiles_Products"),
+            readSheet(sheetsConfig.url, "Mobiles_Purchases"),
+            readSheet(sheetsConfig.url, "Mobiles_Accessories"),
+            readSheet(sheetsConfig.url, "Mobiles_WarrantyClaims"),
           ]);
           if (salesRows.length > 0) {
             const sanitizedSales = salesRows.map((r: any) => {
@@ -939,6 +977,20 @@ export const useMobileStore = create<MobilesState>()(
             }));
             set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
           }
+          if (prodRows.length > 0) set({ products: prodRows as unknown as MobileProduct[] });
+          if (purRows.length > 0) set({ purchases: purRows as unknown as MobilePurchase[] });
+          if (accRows.length > 0) {
+            const sanitizedAcc = accRows.map((r: any) => ({
+              ...r,
+              stock: Number(r.stock) || 0,
+              minLimit: Number(r.minLimit) || 0,
+              purchasePrice: Number(r.purchasePrice) || 0,
+              sellingPrice: Number(r.sellingPrice) || 0,
+            }));
+            set({ accessories: sanitizedAcc as unknown as MobileAccessory[] });
+          }
+          if (warRows.length > 0) set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
+
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -985,6 +1037,8 @@ let _lastMobProducts = useMobileStore.getState().products;
 let _lastMobExpenses = useMobileStore.getState().expenses;
 let _lastMobSuppliers = useMobileStore.getState().suppliers;
 let _lastMobCustomers = useMobileStore.getState().customers;
+let _lastMobAccessories = useMobileStore.getState().accessories;
+let _lastMobWarranties = useMobileStore.getState().warranties;
 
 useMobileStore.subscribe((state) => {
   if (!state.sheetsConfig.enabled || !state.sheetsConfig.url) return;
@@ -995,7 +1049,9 @@ useMobileStore.subscribe((state) => {
     state.products !== _lastMobProducts ||
     state.expenses !== _lastMobExpenses ||
     state.suppliers !== _lastMobSuppliers ||
-    state.customers !== _lastMobCustomers
+    state.customers !== _lastMobCustomers ||
+    state.accessories !== _lastMobAccessories ||
+    state.warranties !== _lastMobWarranties
   ) {
     _lastMobSales = state.sales;
     _lastMobPurchases = state.purchases;
@@ -1003,6 +1059,8 @@ useMobileStore.subscribe((state) => {
     _lastMobExpenses = state.expenses;
     _lastMobSuppliers = state.suppliers;
     _lastMobCustomers = state.customers;
+    _lastMobAccessories = state.accessories;
+    _lastMobWarranties = state.warranties;
 
     if (_mobilesAutoSyncTimer) clearTimeout(_mobilesAutoSyncTimer);
     _mobilesAutoSyncTimer = setTimeout(() => {

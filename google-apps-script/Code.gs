@@ -83,8 +83,8 @@ function doGet(e) {
       });
     }
 
-    // ── 2. Digest — row counts for all sheets in one call ─────────────
-    // Used by the polling engine: if counts haven't changed, skip full read
+    // ── 2. Digest — row counts and content fingerprints for all sheets ─
+    // Used by the polling engine: detects additions, deletions, and edits
     if (action === "digest") {
       if (!isConfigured) {
         return jsonResponse({ status: "error", error: "SETUP_REQUIRED: Spreadsheet ID not configured." });
@@ -93,8 +93,18 @@ function doGet(e) {
         var ss0 = SpreadsheetApp.openById(SPREADSHEET_ID);
         var digest = {};
         for (var di = 0; di < ALLOWED_SHEETS.length; di++) {
-          var sh0 = ss0.getSheetByName(ALLOWED_SHEETS[di]);
-          digest[ALLOWED_SHEETS[di]] = sh0 ? Math.max(0, sh0.getLastRow() - 1) : 0;
+          var sheetNameItem = ALLOWED_SHEETS[di];
+          var sh0 = ss0.getSheetByName(sheetNameItem);
+          if (!sh0 || sh0.getLastRow() < 2) {
+            digest[sheetNameItem] = "0";
+          } else {
+            var rowCount = sh0.getLastRow() - 1;
+            var colCount = sh0.getLastColumn();
+            // Create a lightweight content fingerprint using row count, column count, and cell data length
+            var valSample = sh0.getRange(1, 1, Math.min(rowCount + 1, 100), colCount).getValues();
+            var sampleStr = valSample.join("");
+            digest[sheetNameItem] = rowCount + "_" + sampleStr.length + "_" + colCount;
+          }
         }
         return jsonResponse({ status: "ok", digest: digest });
       } catch (digestErr) {
@@ -182,7 +192,15 @@ function doGet(e) {
       }
 
       if (!Array.isArray(rows) || rows.length === 0) {
-        return jsonResponse({ status: "ok", written: 0, message: "No rows to write" });
+        // Empty array means "clear all data" — keep headers if they exist, otherwise just clear
+        if (action === "write") {
+          var ss2c = SpreadsheetApp.openById(SPREADSHEET_ID);
+          var sheet2c = ss2c.getSheetByName(sheetName);
+          if (sheet2c) {
+            sheet2c.clearContents();
+          }
+        }
+        return jsonResponse({ status: "ok", written: 0, message: "Sheet cleared (empty payload)" });
       }
 
       var ss2    = SpreadsheetApp.openById(SPREADSHEET_ID);

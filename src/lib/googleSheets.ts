@@ -165,7 +165,12 @@ export async function writeSheet(
   sheet: SheetName,
   rows: SheetRow[]
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    // Send a write with a single dummy row then clear — or use a minimal clear payload
+    // We use the write action with an empty-marker row, then the script clears the sheet
+    await getFromScript(url, { action: "write", sheet, payload: b64Encode("[]") });
+    return;
+  }
   await writeChunked(url, "write", sheet, rows);
 }
 

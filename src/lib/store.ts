@@ -474,6 +474,7 @@ type State = {
   loginWithPassword: (email: string, password: string) => boolean;
   logout: () => void;
   addStaff: (input: { name: string; email: string; role: string; access?: "Finance" | "Mobiles" | "Both"; password?: string }) => Staff;
+  updateStaff: (id: string, input: Partial<Omit<Staff, "id">>) => Staff | undefined;
   deleteStaff: (id: string) => void;
   deleteCustomer: (id: string) => void;
   deleteLoan: (id: string) => void;
@@ -619,7 +620,39 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        // Trigger immediate background sync to Google Sheets
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate staff add sync failed:", err));
         return newMember;
+      },
+
+      updateStaff: (id, input) => {
+        const existing = get().staff.find((s) => s.id === id);
+        if (!existing) return undefined;
+        const updated: Staff = {
+          ...existing,
+          name: input.name ?? existing.name,
+          email: input.email ?? existing.email,
+          role: input.role ?? existing.role,
+          access: input.access ?? existing.access,
+          password: input.password !== undefined ? input.password : existing.password,
+          status: input.status ?? existing.status,
+        };
+        set((s) => ({
+          staff: s.staff.map((m) => (m.id === id ? updated : m)),
+          currentUser: s.currentUser?.id === id ? updated : s.currentUser,
+          audit: [
+            {
+              ts: new Date().toLocaleString("en-IN"),
+              user: s.currentUser?.name || "System",
+              action: "Updated staff member",
+              target: `${id} · ${updated.name} (${updated.role})`,
+            },
+            ...s.audit,
+          ],
+        }));
+        // Trigger immediate background sync to Google Sheets
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate staff update sync failed:", err));
+        return updated;
       },
 
       deleteStaff: (id) => {
@@ -636,6 +669,8 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        // Trigger immediate background sync to Google Sheets
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate staff delete sync failed:", err));
       },
 
       deleteCustomer: (id) => {
@@ -655,6 +690,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate customer delete sync failed:", err));
       },
 
       deleteLoan: (id) => {
@@ -741,6 +777,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate payment delete sync failed:", err));
       },
 
       deleteExpense: (id) => {
@@ -757,6 +794,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate expense delete sync failed:", err));
       },
 
       deleteInvestment: (id) => {
@@ -773,6 +811,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate investment delete sync failed:", err));
       },
 
       deleteDocument: (id) => {
@@ -1015,6 +1054,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate customer add sync failed:", err));
         return customer;
       },
 
@@ -1090,6 +1130,7 @@ export const useStore = create<State>()(
           ],
         }));
 
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate customer update sync failed:", err));
         return updated;
       },
 
@@ -1136,6 +1177,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate payment sync failed:", err));
       },
 
       addLoan: (input) => {
@@ -1180,6 +1222,7 @@ export const useStore = create<State>()(
             ...s.payments,
           ],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate custom payment sync failed:", err));
       },
 
       addExpense: (input) => {
@@ -1202,6 +1245,7 @@ export const useStore = create<State>()(
           expenses: [expense, ...s.expenses],
           audit: [{ ts: new Date().toLocaleString("en-IN"), user: "Rajesh Jain", action: `Added ${expense.type?.toLowerCase() || "expense"}`, target: `${id} · ${expense.amount}` }, ...s.audit],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate expense sync failed:", err));
         return expense;
       },
 
@@ -1222,6 +1266,7 @@ export const useStore = create<State>()(
           investments: [investment, ...s.investments],
           audit: [{ ts: new Date().toLocaleString("en-IN"), user: "Rajesh Jain", action: "Added investment", target: `${id} · ${investment.amount}` }, ...s.audit],
         }));
+        get().syncToSheets().catch((err) => console.warn("[Store] Immediate investment sync failed:", err));
         return investment;
       },
 
@@ -1291,14 +1336,30 @@ export const useStore = create<State>()(
         }
         try {
           await writeSheet(sheetsConfig.url, "Finance_Customers", customers.map((c) => ({
-            id: c.id, name: c.name, mobile: c.mobile, village: c.village, region: c.region,
-            price: c.price, deposit: c.deposit, emi: c.emi, noOfEmi: c.noOfEmi,
-            emiDate: c.emiDate, billDate: c.billDate, status: c.status,
-            mobileBrand: c.mobileBrand, mobileModel: c.mobileModel,
+            id: c.id, billDate: c.billDate || "",
+            firstName: c.firstName || "", fatherName: c.fatherName || "", surname: c.surname || "",
+            name: c.name, mobile: c.mobile, aadhaar: c.aadhaar || "",
+            guarantyName: c.guarantyName || "", guarantyMobile: c.guarantyMobile || "",
+            region: c.region || "", village: c.village || "",
+            mobileBrand: c.mobileBrand || "", mobileModel: c.mobileModel || "", ramRom: c.ramRom || "",
+            imei1: c.imei1 || "", imei2: c.imei2 || "",
+            price: c.price, fileCharge: c.fileCharge, deposit: c.deposit,
+            balanceForEmi: c.balanceForEmi, interestRate: c.interestRate,
+            interestPerMonth: c.interestPerMonth, noOfEmi: c.noOfEmi,
+            totalInterest: c.totalInterest, totalEmiAmount: c.totalEmiAmount,
+            perMonthEmi: c.perMonthEmi, emiDate: c.emiDate || "",
+            paidEmis: c.paidEmis, pendingEmis: c.pendingEmis,
+            pendingAmount: c.pendingAmount,
+            lastPaymentDate: c.lastPaymentDate || "—",
+            lastPaymentAmt: c.lastPaymentAmt,
+            status: c.status, missedEmis: c.missedEmis ?? 0,
+            loan: c.loan || "", emi: c.emi || "", due: c.due || "",
           })));
           await writeSheet(sheetsConfig.url, "Finance_Payments", payments.map((p) => ({
-            id: p.id, customer: p.customer, amount: p.amount, method: p.method,
-            date: p.date, collector: p.collector, remarks: p.remarks,
+            id: p.id, customer: p.customer, customerId: p.customerId || "",
+            amount: p.amount, method: p.method,
+            date: p.date, collector: p.collector, remarks: p.remarks || "",
+            pending: p.pending || "", status: p.status || "Success",
           })));
           await writeSheet(sheetsConfig.url, "Finance_Expenses", expenses.map((e) => ({
             id: e.id, date: e.date, cat: e.cat, desc: e.desc,
@@ -1334,19 +1395,39 @@ export const useStore = create<State>()(
             readSheet(sheetsConfig.url, "Finance_Investments"),
             readSheet(sheetsConfig.url, "Finance_Staff"),
           ]);
-          // Only apply if sheets had data
+          // Customers: parse all numeric fields
           if (custRows.length > 0) {
-            set({ customers: custRows as unknown as Customer[] });
+            const sanitized = custRows.map((r: any) => ({
+              ...r,
+              price: Number(r.price) || 0,
+              fileCharge: Number(r.fileCharge) || 0,
+              deposit: Number(r.deposit) || 0,
+              balanceForEmi: Number(r.balanceForEmi) || 0,
+              interestRate: Number(r.interestRate) || 0,
+              interestPerMonth: Number(r.interestPerMonth) || 0,
+              noOfEmi: Number(r.noOfEmi) || 0,
+              totalInterest: Number(r.totalInterest) || 0,
+              totalEmiAmount: Number(r.totalEmiAmount) || 0,
+              perMonthEmi: Number(r.perMonthEmi) || 0,
+              paidEmis: Number(r.paidEmis) || 0,
+              pendingEmis: Number(r.pendingEmis) || 0,
+              pendingAmount: Number(r.pendingAmount) || 0,
+              lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
+              missedEmis: Number(r.missedEmis) || 0,
+            }));
+            set({ customers: sanitized as unknown as Customer[] });
           }
+          // Payments: ensure customerId and status are present
           if (payRows.length > 0) {
-            set({ payments: payRows as unknown as Payment[] });
+            const sanitizedPay = payRows.map((r: any) => ({
+              ...r,
+              customerId: String(r.customerId || ""),
+              status: (r.status || "Success") as "Success" | "Refunded",
+            }));
+            set({ payments: sanitizedPay as unknown as Payment[] });
           }
-          if (expRows.length > 0) {
-            set({ expenses: expRows as unknown as Expense[] });
-          }
-          if (invRows.length > 0) {
-            set({ investments: invRows as unknown as Investment[] });
-          }
+          if (expRows.length > 0) set({ expenses: expRows as unknown as Expense[] });
+          if (invRows.length > 0) set({ investments: invRows as unknown as Investment[] });
           if (staffRows.length > 0) {
             const mappedStaff = staffRows.map((r: any) => ({
               id: String(r.id || ""),

@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { ShieldAlert, ShieldCheck, Users, Trash, UserPlus, Lock } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Users, Trash, UserPlus, Lock, RefreshCw, Edit } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader } from "@/components/ui-kit";
-import { useStore } from "@/lib/store";
+import { useStore, type Staff } from "@/lib/store";
+import { triggerManualSync } from "@/lib/useRealtimeSync";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/roles")({
@@ -20,10 +21,30 @@ export const Route = createFileRoute("/roles")({
 function RolesPage() {
   const staff = useStore((s) => s.staff);
   const addStaff = useStore((s) => s.addStaff);
+  const updateStaff = useStore((s) => s.updateStaff);
   const deleteStaff = useStore((s) => s.deleteStaff);
   const currentUser = useStore((s) => s.currentUser);
 
   const isAdmin = currentUser?.role?.toLowerCase() === "admin";
+
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Add Staff form state
+  const [showAddStaff, setShowAddStaff] = useState(false);
+  const [staffName, setStaffName] = useState("");
+  const [staffEmail, setStaffEmail] = useState("");
+  const [staffRole, setStaffRole] = useState("Staff");
+  const [staffAccess, setStaffAccess] = useState<"Finance" | "Mobiles" | "Both">("Both");
+  const [staffPassword, setStaffPassword] = useState("");
+
+  // Edit Staff form state
+  const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editRole, setEditRole] = useState("Staff");
+  const [editAccess, setEditAccess] = useState<"Finance" | "Mobiles" | "Both">("Both");
+  const [editPassword, setEditPassword] = useState("");
+  const [editStatus, setEditStatus] = useState<"Active" | "Inactive">("Active");
 
   // Route-level guard: non-admins cannot access this page even by direct URL
   if (!isAdmin) {
@@ -42,18 +63,27 @@ function RolesPage() {
     );
   }
 
-  // Add Staff form state
-  const [showAddStaff, setShowAddStaff] = useState(false);
-  const [staffName, setStaffName] = useState("");
-  const [staffEmail, setStaffEmail] = useState("");
-  const [staffRole, setStaffRole] = useState("Staff");
-  const [staffAccess, setStaffAccess] = useState<"Finance" | "Mobiles" | "Both">("Both");
-  const [staffPassword, setStaffPassword] = useState("");
-
   // Dynamic user counters
   const totalStaff = staff.length;
   const adminCount = staff.filter((s) => s.role.toLowerCase() === "admin").length;
   const staffCount = staff.filter((s) => s.role.toLowerCase() === "staff").length;
+
+  const handleManualRefresh = async () => {
+    setIsSyncing(true);
+    toast.info("Syncing staff directory with Google Sheets...");
+    try {
+      const ok = await triggerManualSync(true);
+      if (ok) {
+        toast.success("Staff directory up to date");
+      } else {
+        toast.error("Could not sync with Google Sheets. Using local directory.");
+      }
+    } catch {
+      toast.error("Failed to refresh staff directory");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleAddStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +101,6 @@ function RolesPage() {
       return;
     }
 
-
     addStaff({
       name: staffName.trim(),
       email: staffEmail.trim().toLowerCase(),
@@ -80,13 +109,54 @@ function RolesPage() {
       password: staffPassword.trim(),
     });
 
-    toast.success(`Staff member "${staffName}" added successfully`);
+    toast.success(`Staff member "${staffName}" added & synced successfully`);
     setStaffName("");
     setStaffEmail("");
     setStaffRole("Staff");
     setStaffAccess("Both");
     setStaffPassword("");
     setShowAddStaff(false);
+  };
+
+  const handleEditStaffClick = (member: Staff) => {
+    setEditingStaff(member);
+    setEditName(member.name);
+    setEditEmail(member.email);
+    setEditRole(member.role);
+    setEditAccess(member.access || "Both");
+    setEditPassword(member.password || "");
+    setEditStatus(member.status || "Active");
+  };
+
+  const handleEditStaffSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStaff) return;
+    if (!editName.trim()) {
+      toast.error("Please enter a name");
+      return;
+    }
+    if (!editEmail.trim() || !editEmail.includes("@")) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+
+    // Check duplicate email against other staff members
+    if (staff.some((s) => s.id !== editingStaff.id && s.email.toLowerCase() === editEmail.trim().toLowerCase())) {
+      toast.error("Another staff member with this email already exists");
+      return;
+    }
+
+    updateStaff(editingStaff.id, {
+      name: editName.trim(),
+      email: editEmail.trim().toLowerCase(),
+      role: editRole,
+      access: editAccess,
+      password: editPassword.trim(),
+      status: editStatus,
+    });
+
+    toast.success(`Staff member "${editName}" updated & synced`);
+    setEditingStaff(null);
   };
 
   const handleDeleteStaffClick = (id: string, name: string) => {
@@ -105,11 +175,24 @@ function RolesPage() {
   return (
     <AppShell breadcrumb="Roles & Staff">
       {/* Header */}
-      <div className="mb-6 border-b border-border pb-4">
-        <h1 className="text-[26px] font-semibold tracking-tight">Staff Directory</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage system access, register staff members, and control user accounts.
-        </p>
+      <div className="mb-6 border-b border-border pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-[26px] font-semibold tracking-tight">Staff Directory</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage system access, register staff members, and control user accounts across devices.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleManualRefresh}
+            disabled={isSyncing}
+            className="h-9 px-3.5 rounded-md border border-border text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-accent transition-colors shadow-sm disabled:opacity-50"
+            title="Refresh staff directory from Google Sheets"
+          >
+            <RefreshCw className={`size-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing..." : "Sync Directory"}
+          </button>
+        </div>
       </div>
 
       <div className="space-y-6">
@@ -204,24 +287,33 @@ function RolesPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 text-xs text-success font-medium">
-                          <span className="size-1.5 rounded-full bg-success" /> Active
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${member.status === "Inactive" ? "text-muted-foreground" : "text-success"}`}>
+                          <span className={`size-1.5 rounded-full ${member.status === "Inactive" ? "bg-muted-foreground" : "bg-success"}`} /> {member.status || "Active"}
                         </span>
                       </td>
                       <td className="px-5 py-3 text-right">
                         {isAdmin ? (
-                          <button
-                            onClick={() => handleDeleteStaffClick(member.id, member.name)}
-                            disabled={isSelf}
-                            className={`size-8 rounded-md inline-flex items-center justify-center border transition-all ${
-                              isSelf
-                                ? "border-zinc-800 text-zinc-600 opacity-30 cursor-not-allowed"
-                                : "border-border text-danger bg-surface hover:bg-danger/10 hover:border-danger/30"
-                            }`}
-                            title={isSelf ? "Cannot delete your own account" : `Delete ${member.name}`}
-                          >
-                            <Trash className="size-3.5" />
-                          </button>
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            <button
+                              onClick={() => handleEditStaffClick(member)}
+                              className="size-8 rounded-md inline-flex items-center justify-center border border-border text-foreground bg-surface hover:bg-accent transition-all"
+                              title={`Edit ${member.name}`}
+                            >
+                              <Edit className="size-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteStaffClick(member.id, member.name)}
+                              disabled={isSelf}
+                              className={`size-8 rounded-md inline-flex items-center justify-center border transition-all ${
+                                isSelf
+                                  ? "border-zinc-800 text-zinc-600 opacity-30 cursor-not-allowed"
+                                  : "border-border text-danger bg-surface hover:bg-danger/10 hover:border-danger/30"
+                              }`}
+                              title={isSelf ? "Cannot delete your own account" : `Delete ${member.name}`}
+                            >
+                              <Trash className="size-3.5" />
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
@@ -315,6 +407,102 @@ function RolesPage() {
                   className="h-9 px-5 rounded-md bg-foreground text-background text-xs font-bold shadow hover:opacity-90 transition-opacity"
                 >
                   Add Staff
+                </button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Staff Dialog */}
+        <Dialog open={Boolean(editingStaff)} onOpenChange={(open) => !open && setEditingStaff(null)}>
+          <DialogContent className="max-w-md p-6">
+            <DialogHeader className="border-b border-border pb-3 mb-4">
+              <DialogTitle className="text-base font-bold uppercase tracking-wider text-primary inline-flex items-center gap-1.5">
+                <Edit className="size-4 text-blue-500" /> Edit Staff Member
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground mt-1">
+                Update account details, role permissions, or password for {editingStaff?.name}.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleEditStaffSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Full Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Email Address</label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Access Role</label>
+                <select
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground cursor-pointer"
+                >
+                  {allAvailableRoles.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Access Module</label>
+                <select
+                  value={editAccess}
+                  onChange={(e) => setEditAccess(e.target.value as "Finance" | "Mobiles" | "Both")}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground cursor-pointer"
+                >
+                  <option value="Both">Both (Finance & Mobiles)</option>
+                  <option value="Finance">Jain Finance Only</option>
+                  <option value="Mobiles">Jain Mobiles Only</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Account Status</label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as "Active" | "Inactive")}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground cursor-pointer"
+                >
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Password</label>
+                <input
+                  type="password"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="Set new password or leave as is"
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground"
+                />
+              </div>
+              <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingStaff(null)}
+                  className="h-9 px-4 rounded-md border border-border text-xs font-semibold hover:bg-accent transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="h-9 px-5 rounded-md bg-foreground text-background text-xs font-bold shadow hover:opacity-90 transition-opacity"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>
