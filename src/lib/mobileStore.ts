@@ -916,9 +916,9 @@ export const useMobileStore = create<MobilesState>()(
             status: a.status,
           })));
           await writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", warranties.map((w) => ({
-            id: w.id, customerName: w.customerName, mobile: w.mobile,
+            id: w.id, customerName: w.customerName, mobile: w.customerMobile || "",
             productName: w.productName, imei: w.imei, claimDate: w.claimDate,
-            issueDescription: w.issueDescription, status: w.status,
+            issueDescription: w.issue || "", status: w.status,
           })));
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
