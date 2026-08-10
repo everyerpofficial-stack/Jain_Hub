@@ -1,14 +1,15 @@
 import { useState, useMemo } from "react";
 import {
   TrendingUp, TrendingDown, Wallet, IndianRupee,
-  Smartphone, Building, BarChart3, AlertCircle, ArrowUpRight, ArrowDownRight, Search, Activity
+  Smartphone, Building, BarChart3, AlertCircle, ArrowUpRight, ArrowDownRight, Search, Activity, Download
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   AreaChart, Area
 } from "recharts";
+import { toast } from "sonner";
 import { Card, SectionHeader, StatCard, Badge } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { useStore, parseAppDate, isDateInRange, downloadExcel } from "@/lib/store";
 import { useMobileStore } from "@/lib/mobileStore";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -430,27 +431,48 @@ export function CashFlowDashboard() {
           </p>
         </div>
 
-        {/* Tab Selector */}
-        <div className="flex bg-muted/60 border border-border p-1 rounded-xl shadow-inner shrink-0">
-          {(["Combined", "Finance", "Mobiles"] as const).map((tab) => {
-            const isActive = activeTab === tab;
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200 ${
-                  isActive
-                    ? "bg-background text-foreground shadow-md scale-[1.02]"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/20"
-                }`}
-              >
-                {tab === "Combined" && <Activity className="size-3.5 text-primary" />}
-                {tab === "Finance" && <Building className="size-3.5 text-success" />}
-                {tab === "Mobiles" && <Smartphone className="size-3.5 text-info" />}
-                <span>{tab}</span>
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => {
+              downloadExcel(`cashflow-${activeTab.toLowerCase()}.xlsx`, `Cash Flow Ledger (${activeTab})`, activeRawItems.map((item) => ({
+                Reference: item.id,
+                Date: item.date,
+                Module: item.module,
+                Type: item.type,
+                "Payment Method": item.method,
+                Category: item.category,
+                Description: item.description,
+                "Amount (₹)": item.amount,
+              })));
+              toast.success(`Exported ${activeTab} cash flow ledger to Excel`);
+            }}
+            className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
+          >
+            <Download className="size-3.5" /> Export Excel
+          </button>
+
+          {/* Tab Selector */}
+          <div className="flex bg-muted/60 border border-border p-1 rounded-xl shadow-inner shrink-0">
+            {(["Combined", "Finance", "Mobiles"] as const).map((tab) => {
+              const isActive = activeTab === tab;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200 ${
+                    isActive
+                      ? "bg-background text-foreground shadow-md scale-[1.02]"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/20"
+                  }`}
+                >
+                  {tab === "Combined" && <Activity className="size-3.5 text-primary" />}
+                  {tab === "Finance" && <Building className="size-3.5 text-success" />}
+                  {tab === "Mobiles" && <Smartphone className="size-3.5 text-info" />}
+                  <span>{tab}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

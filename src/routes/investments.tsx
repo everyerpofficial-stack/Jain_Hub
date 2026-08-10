@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Download } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { useStore, parseAppDate, isDateInRange, downloadExcel } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -134,9 +134,29 @@ function InvestmentsPage() {
             {filteredInvestments.length} investors · ₹{total.toLocaleString("en-IN")} deployed
           </p>
         </div>
-        <button onClick={() => openDialog("investment")} className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity cursor-pointer">
-          <Plus className="size-3.5" /> Add Investment
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              downloadExcel("investments-portfolio.xlsx", "Investment Portfolio", filteredInvestments.map((inv) => ({
+                "Investor ID": inv.id,
+                Investor: inv.investor,
+                "Capital Amount": inv.amount,
+                "ROI Rate": inv.roi,
+                "Investment Date": inv.date || "—",
+                "Maturity Date": inv.maturity,
+                "Payment Mode": inv.method || "Cash",
+                Status: inv.status,
+              })));
+              toast.success("Investment portfolio exported to Excel");
+            }}
+            className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
+          >
+            <Download className="size-3.5" /> Export Excel
+          </button>
+          <button onClick={() => openDialog("investment")} className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity cursor-pointer">
+            <Plus className="size-3.5" /> Add Investment
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}

@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Download } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, ProgressBar, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { useStore, parseAppDate, isDateInRange, downloadExcel } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -145,9 +145,28 @@ function ExpensesPage() {
             {incomeByCat.length + expenseByCat.length} categories · {filteredEntries.length} transaction entries
           </p>
         </div>
-        <button onClick={() => openDialog("expense")} className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity">
-          <Plus className="size-3.5" /> Add Income / Expense
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              downloadExcel("finance-ledger-cashflow.xlsx", "Income & Expense Ledger", filteredEntries.map((e) => ({
+                Reference: e.id,
+                Date: e.date,
+                Type: e.type || (isIncome(e) ? "Income" : "Expense"),
+                "Payment Method": e.method || "Cash",
+                Category: e.cat,
+                Description: e.desc,
+                Amount: e.amount,
+              })));
+              toast.success("Income & Expense ledger exported to Excel");
+            }}
+            className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
+          >
+            <Download className="size-3.5" /> Export Excel
+          </button>
+          <button onClick={() => openDialog("expense")} className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity cursor-pointer">
+            <Plus className="size-3.5" /> Add Income / Expense
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}
