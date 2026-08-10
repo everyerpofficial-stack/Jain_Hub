@@ -1,0 +1,1 @@
+import{o as e}from"./ui-kit-D-AU4L1z.js";import{t}from"./CashFlowDashboard-Bfidd5BT.js";import{H as n}from"./index-PjH9Mlxc.js";var r=n();function i(){return(0,r.jsx)(e,{breadcrumb:`Finance > Cash & Bank Flow`,children:(0,r.jsx)(t,{})})}export{i as component};
