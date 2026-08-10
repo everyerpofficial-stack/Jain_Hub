@@ -945,51 +945,50 @@ export const useMobileStore = create<MobilesState>()(
             readSheet(sheetsConfig.url, "Mobiles_Accessories"),
             readSheet(sheetsConfig.url, "Mobiles_WarrantyClaims"),
           ]);
-          if (salesRows.length > 0) {
-            const sanitizedSales = salesRows.map((r: any) => {
-              let parsedItems = [];
-              if (Array.isArray(r.items)) {
-                parsedItems = r.items;
-              } else if (typeof r.items === "string" && r.items.trim()) {
-                try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
-              }
-              return {
-                ...r,
-                subtotal: Number(r.subtotal) || Number(r.totalAmount) || 0,
-                gst: Number(r.gst) || 0,
-                totalAmount: Number(r.totalAmount) || 0,
-                amountPaid: Number(r.amountPaid) || 0,
-                dueAmount: Number(r.dueAmount) || 0,
-                items: parsedItems,
-              };
-            });
-            set({ sales: sanitizedSales as unknown as MobileSale[] });
-          }
-          if (expRows.length > 0) set({ expenses: expRows as unknown as MobileExpense[] });
-          if (supRows.length > 0) set({ suppliers: supRows as unknown as MobileSupplier[] });
-          if (supPayRows.length > 0) set({ supplierPayments: supPayRows as unknown as SupplierPayment[] });
-          if (custRows.length > 0) {
-            const sanitizedCustomers = custRows.map((r: any) => ({
+          const sanitizedSales = salesRows.map((r: any) => {
+            let parsedItems = [];
+            if (Array.isArray(r.items)) {
+              parsedItems = r.items;
+            } else if (typeof r.items === "string" && r.items.trim()) {
+              try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
+            }
+            return {
               ...r,
-              mobile: String(r.mobile ?? ""),
-              outstanding: Number(r.outstanding) || 0,
-              isBlacklisted: r.isBlacklisted === true || r.isBlacklisted === "true",
-            }));
-            set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
-          }
-          if (prodRows.length > 0) set({ products: prodRows as unknown as MobileProduct[] });
-          if (purRows.length > 0) set({ purchases: purRows as unknown as MobilePurchase[] });
-          if (accRows.length > 0) {
-            const sanitizedAcc = accRows.map((r: any) => ({
-              ...r,
-              stock: Number(r.stock) || 0,
-              minLimit: Number(r.minLimit) || 0,
-              purchasePrice: Number(r.purchasePrice) || 0,
-              sellingPrice: Number(r.sellingPrice) || 0,
-            }));
-            set({ accessories: sanitizedAcc as unknown as MobileAccessory[] });
-          }
-          if (warRows.length > 0) set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
+              subtotal: Number(r.subtotal) || Number(r.totalAmount) || 0,
+              gst: Number(r.gst) || 0,
+              totalAmount: Number(r.totalAmount) || 0,
+              amountPaid: Number(r.amountPaid) || 0,
+              dueAmount: Number(r.dueAmount) || 0,
+              items: parsedItems,
+            };
+          });
+          set({ sales: sanitizedSales as unknown as MobileSale[] });
+
+          set({ expenses: expRows as unknown as MobileExpense[] });
+          set({ suppliers: supRows as unknown as MobileSupplier[] });
+          set({ supplierPayments: supPayRows as unknown as SupplierPayment[] });
+
+          const sanitizedCustomers = custRows.map((r: any) => ({
+            ...r,
+            mobile: String(r.mobile ?? ""),
+            outstanding: Number(r.outstanding) || 0,
+            isBlacklisted: r.isBlacklisted === true || r.isBlacklisted === "true",
+          }));
+          set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
+
+          set({ products: prodRows as unknown as MobileProduct[] });
+          set({ purchases: purRows as unknown as MobilePurchase[] });
+
+          const sanitizedAcc = accRows.map((r: any) => ({
+            ...r,
+            stock: Number(r.stock) || 0,
+            minLimit: Number(r.minLimit) || 0,
+            purchasePrice: Number(r.purchasePrice) || 0,
+            sellingPrice: Number(r.sellingPrice) || 0,
+          }));
+          set({ accessories: sanitizedAcc as unknown as MobileAccessory[] });
+
+          set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
 
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));

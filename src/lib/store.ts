@@ -1395,39 +1395,38 @@ export const useStore = create<State>()(
             readSheet(sheetsConfig.url, "Finance_Investments"),
             readSheet(sheetsConfig.url, "Finance_Staff"),
           ]);
-          // Customers: parse all numeric fields
-          if (custRows.length > 0) {
-            const sanitized = custRows.map((r: any) => ({
-              ...r,
-              price: Number(r.price) || 0,
-              fileCharge: Number(r.fileCharge) || 0,
-              deposit: Number(r.deposit) || 0,
-              balanceForEmi: Number(r.balanceForEmi) || 0,
-              interestRate: Number(r.interestRate) || 0,
-              interestPerMonth: Number(r.interestPerMonth) || 0,
-              noOfEmi: Number(r.noOfEmi) || 0,
-              totalInterest: Number(r.totalInterest) || 0,
-              totalEmiAmount: Number(r.totalEmiAmount) || 0,
-              perMonthEmi: Number(r.perMonthEmi) || 0,
-              paidEmis: Number(r.paidEmis) || 0,
-              pendingEmis: Number(r.pendingEmis) || 0,
-              pendingAmount: Number(r.pendingAmount) || 0,
-              lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
-              missedEmis: Number(r.missedEmis) || 0,
-            }));
-            set({ customers: sanitized as unknown as Customer[] });
-          }
+          // Customers: parse all numeric fields (always update state, even if empty array)
+          const sanitizedCust = custRows.map((r: any) => ({
+            ...r,
+            price: Number(r.price) || 0,
+            fileCharge: Number(r.fileCharge) || 0,
+            deposit: Number(r.deposit) || 0,
+            balanceForEmi: Number(r.balanceForEmi) || 0,
+            interestRate: Number(r.interestRate) || 0,
+            interestPerMonth: Number(r.interestPerMonth) || 0,
+            noOfEmi: Number(r.noOfEmi) || 0,
+            totalInterest: Number(r.totalInterest) || 0,
+            totalEmiAmount: Number(r.totalEmiAmount) || 0,
+            perMonthEmi: Number(r.perMonthEmi) || 0,
+            paidEmis: Number(r.paidEmis) || 0,
+            pendingEmis: Number(r.pendingEmis) || 0,
+            pendingAmount: Number(r.pendingAmount) || 0,
+            lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
+            missedEmis: Number(r.missedEmis) || 0,
+          }));
+          set({ customers: sanitizedCust as unknown as Customer[] });
+
           // Payments: ensure customerId and status are present
-          if (payRows.length > 0) {
-            const sanitizedPay = payRows.map((r: any) => ({
-              ...r,
-              customerId: String(r.customerId || ""),
-              status: (r.status || "Success") as "Success" | "Refunded",
-            }));
-            set({ payments: sanitizedPay as unknown as Payment[] });
-          }
-          if (expRows.length > 0) set({ expenses: expRows as unknown as Expense[] });
-          if (invRows.length > 0) set({ investments: invRows as unknown as Investment[] });
+          const sanitizedPay = payRows.map((r: any) => ({
+            ...r,
+            customerId: String(r.customerId || ""),
+            status: (r.status || "Success") as "Success" | "Refunded",
+          }));
+          set({ payments: sanitizedPay as unknown as Payment[] });
+
+          set({ expenses: expRows as unknown as Expense[] });
+          set({ investments: invRows as unknown as Investment[] });
+
           if (staffRows.length > 0) {
             const mappedStaff = staffRows.map((r: any) => ({
               id: String(r.id || ""),
