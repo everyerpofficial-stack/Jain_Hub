@@ -530,7 +530,7 @@ type State = {
 // This URL is permanently baked into the app — no manual configuration needed.
 const PERMANENT_SHEETS_URL =
   (import.meta.env.VITE_GOOGLE_SHEETS_URL as string) ||
-  "https://script.google.com/macros/s/AKfycbwWVkQNCNKEhICOxfWZasNAeUbJBQTB2gXaTtFk2QzCSt1r2ZhwsuZgTNYGJy_1I1ek/exec";
+  "https://script.google.com/macros/s/AKfycbw7TPJYHXUzKhrzMxhp8oA4AzuOhAM1DZB5xanP6XfOzy1UOvmFhHeUWiV-z-wp5UPiCA/exec";
 
 export const useStore = create<State>()(
   persist(
@@ -1461,11 +1461,11 @@ export const useStore = create<State>()(
         merged.audit = Array.isArray(merged.audit) && merged.audit.length > 0 ? merged.audit : seedAudit;
         merged.documents = Array.isArray(merged.documents) ? merged.documents : [];
         merged.staff = Array.isArray(merged.staff) ? merged.staff : seedStaff;
-        // Always force the permanent URL — override any empty/stale persisted URL
+        // Preserve user configured or disconnected sheetsConfig, fallback to PERMANENT_SHEETS_URL if undefined
         merged.sheetsConfig = {
-          ...merged.sheetsConfig,
-          url: PERMANENT_SHEETS_URL,
-          enabled: true,
+          url: merged.sheetsConfig?.url ?? PERMANENT_SHEETS_URL,
+          enabled: merged.sheetsConfig?.enabled ?? true,
+          lastSync: merged.sheetsConfig?.lastSync,
         };
         return merged;
       }

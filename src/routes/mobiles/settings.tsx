@@ -92,9 +92,22 @@ function SettingsPage() {
 
   const handleSaveUrl = () => {
     const trimmed = urlInput.trim();
-    updateSheetsConfig({ url: trimmed, enabled: !!trimmed });
-    useStore.getState().updateSheetsConfig({ url: trimmed, enabled: !!trimmed });
-    toast.success("Apps Script URL saved for both Finance & Mobiles modules!");
+    if (!trimmed) {
+      toast.error("Please enter a valid Web App URL");
+      return;
+    }
+    updateSheetsConfig({ url: trimmed, enabled: true });
+    useStore.getState().updateSheetsConfig({ url: trimmed, enabled: true });
+    toast.success("Apps Script URL saved & connected for both Finance & Mobiles modules!");
+  };
+
+  const handleDisconnectDatabase = () => {
+    if (!confirm("Are you sure you want to disconnect from Google Sheets database?\n\nAutomatic sync will be paused until you enter a new Web App URL.")) return;
+    setUrlInput("");
+    updateSheetsConfig({ url: "", enabled: false, lastSync: undefined });
+    useStore.getState().updateSheetsConfig({ url: "", enabled: false, lastSync: undefined });
+    setTestResult(null);
+    toast.success("Database disconnected successfully! Enter your new deployment Web App URL below when ready to connect.");
   };
 
   const handleSyncMobiles = async () => {
@@ -326,10 +339,18 @@ function SettingsPage() {
                 />
                 <button
                   onClick={handleSaveUrl}
-                  className="h-9 px-3 rounded-md bg-foreground text-background text-xs font-medium whitespace-nowrap"
+                  className="h-9 px-3 rounded-md bg-foreground text-background text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
                 >
-                  Save URL
+                  {sheetsConfig.url ? "Update URL" : "Connect Database"}
                 </button>
+                {sheetsConfig.url && (
+                  <button
+                    onClick={handleDisconnectDatabase}
+                    className="h-9 px-3 rounded-md border border-danger/40 bg-danger/10 text-danger text-xs font-medium whitespace-nowrap hover:bg-danger/20 transition-colors"
+                  >
+                    Disconnect Database
+                  </button>
+                )}
               </div>
               <p className="mt-1.5 text-[11px] text-muted-foreground">
                 See <code className="bg-muted px-1 py-0.5 rounded text-[10px]">GOOGLE_SHEETS_SETUP.md</code> for step-by-step setup.

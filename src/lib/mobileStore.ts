@@ -1015,11 +1015,11 @@ export const useMobileStore = create<MobilesState>()(
         merged.supplierPayments = Array.isArray(merged.supplierPayments) ? merged.supplierPayments : [];
         merged.audit = Array.isArray(merged.audit) && merged.audit.length > 0 ? merged.audit : seedMobileAudit;
         merged.settings = { ...defaultSettings, ...(merged.settings || {}) };
-        // Always force the permanent URL — override any empty/stale persisted URL
+        // Preserve user configured or disconnected sheetsConfig, fallback to PERMANENT_SHEETS_URL if undefined
         merged.sheetsConfig = {
-          ...merged.sheetsConfig,
-          url: PERMANENT_SHEETS_URL,
-          enabled: true,
+          url: merged.sheetsConfig?.url ?? PERMANENT_SHEETS_URL,
+          enabled: merged.sheetsConfig?.enabled ?? true,
+          lastSync: merged.sheetsConfig?.lastSync,
         };
         return merged;
       }

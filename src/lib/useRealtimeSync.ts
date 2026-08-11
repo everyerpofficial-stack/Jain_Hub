@@ -354,7 +354,7 @@ async function reconcileMobiles(url: string, sheets: string[]) {
       if (sheet === "Mobiles_Expenses")         fullReplace(store.expenses,         set, "expenses");
       if (sheet === "Mobiles_Accessories")      fullReplace(store.accessories,      set, "accessories");
       if (sheet === "Mobiles_SupplierPayments") fullReplace(store.supplierPayments || [], set, "supplierPayments");
-      if (sheet === "Mobiles_WarrantyClaims")   fullReplace(store.warrantyClaims || [], set, "warrantyClaims");
+      if (sheet === "Mobiles_WarrantyClaims")   fullReplace(store.warranties || [], set, "warranties");
 
     } catch (err) {
       console.warn(`[RealtimeSync] Failed to reconcile ${sheet}:`, err);

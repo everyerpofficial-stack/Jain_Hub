@@ -27,7 +27,7 @@ This guide connects your **Jain Finance & Mobiles Hub ERP** to a **single Google
    ```
    Replace it like:
    ```js
-   const SPREADSHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms";
+   const SPREADSHEET_ID = "1Cqww0JJT-5m9IPMSZQMBmiU0YdTFW6or6V6HIQV_7ck";
    ```
 6. Click **💾 Save** (Ctrl+S)
 

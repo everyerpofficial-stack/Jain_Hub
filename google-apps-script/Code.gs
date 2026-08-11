@@ -32,7 +32,7 @@
 
 // ── CONFIGURATION ─────────────────────────────────────────────────────────────
 // Jain Finance & Mobiles Hub — Google Spreadsheet
-var SPREADSHEET_ID = "14LmlxzHqgHAZl9d2q_AZ-Q47ijY_18fXmtQi6A4D8fs";
+var SPREADSHEET_ID = "1Cqww0JJT-5m9IPMSZQMBmiU0YdTFW6or6V6HIQV_7ck";
 
 
 // ── Allowed sheet tabs (security whitelist) ───────────────────────────────────
