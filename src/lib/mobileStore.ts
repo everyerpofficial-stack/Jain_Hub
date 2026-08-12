@@ -458,7 +458,7 @@ function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label
 // ── PERMANENT GOOGLE SHEETS DATABASE URL ─────────────────────────────────────
 const PERMANENT_SHEETS_URL =
   (import.meta.env.VITE_GOOGLE_SHEETS_URL as string) ||
-  "https://script.google.com/macros/s/AKfycbwWVkQNCNKEhICOxfWZasNAeUbJBQTB2gXaTtFk2QzCSt1r2ZhwsuZgTNYGJy_1I1ek/exec";
+  "https://script.google.com/macros/s/AKfycbw7TPJYHXUzKhrzMxhp8oA4AzuOhAM1DZB5xanP6XfOzy1UOvmFhHeUWiV-z-wp5UPiCA/exec";
 
 export const useMobileStore = create<MobilesState>()(
   persist(
