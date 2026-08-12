@@ -772,6 +772,12 @@ export const useStore = create<State>()(
       updateStaff: async (id, input) => {
         const existing = get().staff.find((s) => s.id === id);
         if (!existing) return undefined;
+        // The built-in system admin (ST-001) is fixed — protected here too,
+        // not just hidden in the Roles UI, so no code path can change it.
+        if (id === "ST-001") {
+          console.warn("[Store] Refusing to update protected system admin account ST-001");
+          return existing;
+        }
         // A blank password field means "leave it unchanged" — the UI never
         // shows an existing password back (hashes aren't reversible, and
         // showing a legacy plaintext one back would just be bad practice),
@@ -814,6 +820,10 @@ export const useStore = create<State>()(
       },
 
       deleteStaff: (id) => {
+        if (id === "ST-001") {
+          console.warn("[Store] Refusing to delete protected system admin account ST-001");
+          return;
+        }
         const found = get().staff.find((s) => s.id === id);
         set((s) => ({
           staff: s.staff.filter((m) => m.id !== id),

@@ -270,6 +270,11 @@ function RolesPage() {
               <tbody>
                 {staff.map((member) => {
                   const isSelf = currentUser?.id === member.id;
+                  // The seed account (ST-001) is the built-in system admin —
+                  // fixed and not editable/deletable from this UI, so there's
+                  // always a guaranteed way back in even if every other
+                  // staff record is misconfigured or removed.
+                  const isFixedAdmin = member.id === "ST-001";
                   const initials = member.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
                   return (
                     <tr key={member.id} className="border-t border-border hover:bg-accent/20 transition-colors">
@@ -301,7 +306,12 @@ function RolesPage() {
                         </span>
                       </td>
                       <td className="px-5 py-3 text-right">
-                        {isAdmin ? (
+                        {isFixedAdmin ? (
+                          <div className="inline-flex items-center gap-1.5 justify-end text-muted-foreground" title="Built-in system account — protected, not editable from this screen">
+                            <Lock className="size-3.5" />
+                            <span className="text-xs font-medium">Protected</span>
+                          </div>
+                        ) : isAdmin ? (
                           <div className="inline-flex items-center gap-1 justify-end">
                             <button
                               onClick={() => handleEditStaffClick(member)}
