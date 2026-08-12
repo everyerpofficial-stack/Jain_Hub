@@ -425,6 +425,18 @@ const seedInvestments: Investment[] = [];
 const seedNotifications: Notification[] = [];
 const seedAudit: AuditEntry[] = [];
 
+// Fingerprints of the fake demo entries this seed used to contain (Rajesh
+// Jain / Sunil Verma / "TXN-012" etc.). Audit logs are local-only (never
+// synced to the Google Sheet), so a browser that loaded a build from before
+// this seed was emptied has these permanently cached in localStorage —
+// emptying the seed only prevents it for *new* browsers. This lets an
+// already-affected browser self-clean the very next time it loads.
+const FAKE_AUDIT_TS = new Set([
+  "28 Jul 2026, 10:15 AM", "28 Jul 2026, 09:40 AM", "27 Jul 2026, 04:20 PM",
+  "27 Jul 2026, 02:10 PM", "26 Jul 2026, 11:30 AM", "25 Jul 2026, 05:15 PM",
+  "25 Jul 2026, 10:00 AM", "24 Jul 2026, 03:45 PM",
+]);
+
 // No password is baked in here — this account signs in via emailed OTP
 // (Settings > Roles) until an admin sets a password from the Roles page,
 // which is then stored only in the Google Sheet, never in source control.
@@ -636,7 +648,7 @@ function syncDelete(get: () => State, sheet: SheetName, id: string, label: strin
 // This URL is permanently baked into the app — no manual configuration needed.
 const PERMANENT_SHEETS_URL =
   (import.meta.env.VITE_GOOGLE_SHEETS_URL as string) ||
-  "https://script.google.com/macros/s/AKfycbw7TPJYHXUzKhrzMxhp8oA4AzuOhAM1DZB5xanP6XfOzy1UOvmFhHeUWiV-z-wp5UPiCA/exec";
+  "https://script.google.com/macros/s/AKfycbxgaIiJWfwN9_ssvDfRpWCzbgFwh4aD5OIeibbcaEIP9HxNxWTDyJL5CjFUjduFa1FO7A/exec";
 
 export const useStore = create<State>()(
   persist(
@@ -1606,7 +1618,9 @@ export const useStore = create<State>()(
         merged.expenses = Array.isArray(merged.expenses) ? merged.expenses : seedExpenses;
         merged.investments = Array.isArray(merged.investments) ? merged.investments : seedInvestments;
         merged.notifications = Array.isArray(merged.notifications) ? merged.notifications : seedNotifications;
-        merged.audit = Array.isArray(merged.audit) ? merged.audit : [];
+        merged.audit = Array.isArray(merged.audit)
+          ? merged.audit.filter((a: any) => !FAKE_AUDIT_TS.has(a?.ts))
+          : [];
         merged.documents = Array.isArray(merged.documents) ? merged.documents : [];
         merged.staff = Array.isArray(merged.staff) && merged.staff.length > 0
           ? merged.staff.filter((s: any) => (s.name && String(s.name).trim()) || (s.email && String(s.email).trim()))

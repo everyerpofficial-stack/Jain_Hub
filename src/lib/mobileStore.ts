@@ -332,15 +332,18 @@ const initialWarranties: MobileWarrantyClaim[] = [];
 
 const initialExpenses: MobileExpense[] = [];
 
-const seedMobileAudit: MobileAuditEntry[] = [
-  { ts: "28 Jul 2026, 10:30 AM", user: "Avinash G", action: "Created Sale Bill", target: "INV-MOB-104 · iPhone 15 Pro (₹1,25,000)" },
-  { ts: "28 Jul 2026, 09:15 AM", user: "Ramesh Shah", action: "Stock In", target: "Samsung Galaxy S24 Ultra (5 units)" },
-  { ts: "27 Jul 2026, 05:45 PM", user: "Avinash G", action: "Added Product", target: "OnePlus 12 R (16GB / 256GB)" },
-  { ts: "27 Jul 2026, 01:20 PM", user: "Ramesh Shah", action: "Recorded Purchase", target: "PUR-882 · Brightstar Telecommunications" },
-  { ts: "26 Jul 2026, 03:10 PM", user: "Avinash G", action: "Added Supplier", target: "SUP-009 · National Mobile Distributors" },
-  { ts: "26 Jul 2026, 11:05 AM", user: "Ramesh Shah", action: "Added Expense", target: "EX-M-008 · Shop Electricity Bill (₹4,500)" },
-  { ts: "25 Jul 2026, 04:30 PM", user: "Avinash G", action: "Warranty Claim", target: "CLM-003 · Vivo V30 Pro (Sent to Brand)" },
-];
+const seedMobileAudit: MobileAuditEntry[] = [];
+
+// Fingerprints of the fake demo entries this seed used to contain. Audit
+// logs are local-only (never synced to the Google Sheet), so a browser that
+// loaded an old build before this was emptied has these permanently cached
+// in localStorage — emptying the seed above only prevents it for *new*
+// browsers. This list lets already-affected browsers self-clean on load.
+const FAKE_MOBILE_AUDIT_TS = new Set([
+  "28 Jul 2026, 10:30 AM", "28 Jul 2026, 09:15 AM", "27 Jul 2026, 05:45 PM",
+  "27 Jul 2026, 01:20 PM", "26 Jul 2026, 03:10 PM", "26 Jul 2026, 11:05 AM",
+  "25 Jul 2026, 04:30 PM",
+]);
 
 const defaultSettings: MobileSettings = {
   storeName: "Jain Mobiles & Electronics",
@@ -458,7 +461,7 @@ function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label
 // ── PERMANENT GOOGLE SHEETS DATABASE URL ─────────────────────────────────────
 const PERMANENT_SHEETS_URL =
   (import.meta.env.VITE_GOOGLE_SHEETS_URL as string) ||
-  "https://script.google.com/macros/s/AKfycbw7TPJYHXUzKhrzMxhp8oA4AzuOhAM1DZB5xanP6XfOzy1UOvmFhHeUWiV-z-wp5UPiCA/exec";
+  "https://script.google.com/macros/s/AKfycbxgaIiJWfwN9_ssvDfRpWCzbgFwh4aD5OIeibbcaEIP9HxNxWTDyJL5CjFUjduFa1FO7A/exec";
 
 export const useMobileStore = create<MobilesState>()(
   persist(
@@ -1099,7 +1102,9 @@ export const useMobileStore = create<MobilesState>()(
         merged.warranties = Array.isArray(merged.warranties) ? merged.warranties : initialWarranties;
         merged.expenses = Array.isArray(merged.expenses) ? merged.expenses : initialExpenses;
         merged.supplierPayments = Array.isArray(merged.supplierPayments) ? merged.supplierPayments : [];
-        merged.audit = Array.isArray(merged.audit) && merged.audit.length > 0 ? merged.audit : seedMobileAudit;
+        merged.audit = Array.isArray(merged.audit)
+          ? merged.audit.filter((a: any) => !FAKE_MOBILE_AUDIT_TS.has(a?.ts))
+          : seedMobileAudit;
         merged.settings = { ...defaultSettings, ...(merged.settings || {}) };
         // Preserve user configured or disconnected sheetsConfig, fallback to PERMANENT_SHEETS_URL if undefined
         merged.sheetsConfig = {
