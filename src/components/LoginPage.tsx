@@ -4,8 +4,45 @@ import { useMobileStore } from "@/lib/mobileStore";
 import { toast } from "sonner";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { checkLoginRateLimit, recordLoginFailure, clearLoginFailures } from "@/lib/store";
+import { readSheet } from "@/lib/googleSheets";
+import type { Staff } from "@/lib/store";
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fast staff-only refresh from Google Sheets.
+ * Only reads the Finance_Staff sheet instead of all 5 sheets,
+ * making login ~5x faster on new/other devices.
+ */
+async function refreshStaffFromSheets(): Promise<Staff[]> {
+  const sheetsUrl = useStore.getState().sheetsConfig.url || useMobileStore.getState().sheetsConfig.url || "";
+  if (!sheetsUrl) return [];
+  try {
+    const staffRows = await readSheet(sheetsUrl, "Finance_Staff");
+    if (staffRows.length > 0) {
+      const mappedStaff: Staff[] = staffRows
+        .filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()))
+        .map((r: any) => ({
+          id: String(r.id || ""),
+          name: String(r.name || ""),
+          email: String(r.email || ""),
+          role: String(r.role || "Staff"),
+          status: (r.status || "Active") as "Active" | "Inactive",
+          access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
+          password: r.password ? String(r.password) : undefined,
+          passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
+          passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
+        }));
+      if (mappedStaff.length > 0) {
+        useStore.setState({ staff: mappedStaff });
+        return mappedStaff;
+      }
+    }
+  } catch (err) {
+    console.warn("[Login] Failed to refresh staff from sheets:", err);
+  }
+  return [];
+}
 
 /** Escape special HTML characters to prevent XSS in any dynamic HTML */
 function escapeHtml(str: string): string {
@@ -83,17 +120,14 @@ export function LoginPage() {
     const cleanPass = password.trim();
 
     if (cleanPass) {
-      // Password-based login: loginWithPassword() checks the local staff
-      // cache first for instant sign-in (it's also where hashed-password
-      // verification lives — kept in one place so this UI can't drift out
-      // of sync with how a match is actually determined).
+      // Password-based login: try local staff cache first for instant sign-in.
       let success = await loginWithPassword(cleanEmail, cleanPass);
 
-      // If not matched locally, refresh from sheets once and retry — covers
-      // a device that hasn't synced the staff directory yet.
+      // If not matched locally, fast-refresh ONLY the Staff sheet and retry.
+      // This is much faster than loadFromSheets() which fetches all 5 sheets.
       if (!success && sheetsUrl) {
         try {
-          await useStore.getState().loadFromSheets();
+          await refreshStaffFromSheets();
           success = await loginWithPassword(cleanEmail, cleanPass);
         } catch (err) {
           console.warn("Failed to refresh staff from sheets on login attempt:", err);
@@ -104,7 +138,7 @@ export function LoginPage() {
         toast.success("Signed in successfully", {
           description: "Welcome to the Jain Finance & Mobiles Hub",
         });
-        // Background refresh sheets data without blocking UI
+        // Background refresh all sheets data without blocking UI
         if (sheetsUrl) {
           useStore.getState().loadFromSheets().catch(() => {});
         }
@@ -121,10 +155,15 @@ export function LoginPage() {
       (s) => s.email.toLowerCase() === cleanEmail && s.status === "Active"
     );
 
+    // If not found locally, fast-refresh ONLY the Staff sheet (not all 5)
     if (!exists && sheetsUrl) {
       try {
-        await useStore.getState().loadFromSheets();
-        staffList = useStore.getState().staff;
+        const freshStaff = await refreshStaffFromSheets();
+        if (freshStaff.length > 0) {
+          staffList = freshStaff;
+        } else {
+          staffList = useStore.getState().staff;
+        }
         exists = staffList.find(
           (s) => s.email.toLowerCase() === cleanEmail && s.status === "Active"
         );
@@ -270,6 +309,7 @@ export function LoginPage() {
 
     setLoading(true);
     setTimeout(() => {
+      // Note: 200ms delay provides brief visual feedback via spinner
       if (otpVal === sentOtpRef.current) {
         // Invalidate OTP after use (one-time use)
         sentOtpRef.current = "";
@@ -303,7 +343,7 @@ export function LoginPage() {
         }
       }
       setLoading(false);
-    }, 800);
+    }, 200);
   };
 
   return (
