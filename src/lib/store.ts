@@ -4,7 +4,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import XLSX from "xlsx-js-style";
-import { type SheetsConfig, writeSheet, readSheet, nowTimestamp } from "./googleSheets";
+import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
+import { nextSeqId } from "./utils";
 
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -178,7 +179,11 @@ export type Payment = {
   amount: string;
   pending: string;
   collector: string;
-  method: "Cash" | "UPI";
+  method: "Cash" | "UPI" | "Bank" | "Cash & Bank";
+  /** Only set when method is "Cash & Bank" — the cash portion of `amount` */
+  cashAmount?: number;
+  /** Only set when method is "Cash & Bank" — the bank portion of `amount` */
+  bankAmount?: number;
   status: "Success" | "Refunded";
   remarks: string;
 };
@@ -190,7 +195,7 @@ export type Expense = {
   desc: string;
   amount: string;
   type?: "Income" | "Expense";
-  method?: "Cash" | "UPI";
+  method?: "Cash" | "UPI" | "Bank" | "Cash & Bank";
 };
 
 export type Investment = {
@@ -201,7 +206,7 @@ export type Investment = {
   maturity: string;
   status: "Active" | "Maturing" | "Closed";
   date?: string;
-  method?: "Cash" | "UPI";
+  method?: "Cash" | "UPI" | "Bank" | "Cash & Bank";
 };
 
 export type Notification = {
@@ -239,8 +244,35 @@ export type Staff = {
   role: string;
   status: "Active" | "Inactive";
   access?: "Finance" | "Mobiles" | "Both";
+  /** Legacy plaintext password — only present on rows not yet migrated to
+   * passwordHash/passwordSalt (see hashPassword below). Never written for
+   * a newly-set or rotated password. */
   password?: string;
+  /** SHA-256(passwordSalt + ":" + plaintext), hex-encoded. */
+  passwordHash?: string;
+  /** Random per-account salt, hex-encoded. */
+  passwordSalt?: string;
 };
+
+/** Random hex salt via crypto.getRandomValues (not Math.random). */
+function generateSalt(): string {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Salted SHA-256 password hash. This is a client-only SPA with no server
+ * to hold a secret, so this can't defend against a determined attacker who
+ * reads the app's own source — but it DOES mean a leaked Google Sheet row
+ * or a localStorage dump no longer hands over a directly-reusable plaintext
+ * password, which is what these were stored as before.
+ */
+async function hashPassword(password: string, salt: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`${salt}:${password}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 // Legacy types (kept for backward compat)
 export type Loan = {
@@ -263,7 +295,7 @@ export type Collection = {
   amount: string;
   state: "Collected" | "Pending" | "Missed";
   collector: string;
-  method: "Cash" | "UPI" | "—";
+  method: "Cash" | "UPI" | "Bank" | "Cash & Bank" | "—";
 };
 
 const today = () =>
@@ -391,23 +423,15 @@ const seedPayments: Payment[] = [];
 const seedExpenses: Expense[] = [];
 const seedInvestments: Investment[] = [];
 const seedNotifications: Notification[] = [];
-const seedAudit: AuditEntry[] = [
-  { ts: "28 Jul 2026, 10:15 AM", user: "Avinash G", action: "User Login", target: "Signed in to Jain Finance Management Console" },
-  { ts: "28 Jul 2026, 09:40 AM", user: "Rajesh Jain", action: "Recorded payment", target: "TXN-012 · ₹3,500 from Bajrang Singh" },
-  { ts: "27 Jul 2026, 04:20 PM", user: "Sunil Verma", action: "Added customer", target: "JF-048 · Vikram Patel (Balakwada)" },
-  { ts: "27 Jul 2026, 02:10 PM", user: "Avinash G", action: "Added expense", target: "EX-015 · Office Refreshments (₹1,200)" },
-  { ts: "26 Jul 2026, 11:30 AM", user: "Rajesh Jain", action: "Added investment", target: "INV-004 · Suresh Sharma (₹1,000,000)" },
-  { ts: "25 Jul 2026, 05:15 PM", user: "Sunil Verma", action: "Collected EMI", target: "JF-022 · Ramesh Chandra (₹2,800)" },
-  { ts: "25 Jul 2026, 10:00 AM", user: "Avinash G", action: "Updated Staff", target: "ST-003 · Sunil Verma (Finance Access)" },
-  { ts: "24 Jul 2026, 03:45 PM", user: "Rajesh Jain", action: "Exported Reports", target: "Full Customer Ledger Statement Excel" },
+const seedAudit: AuditEntry[] = [];
+
+// No password is baked in here — this account signs in via emailed OTP
+// (Settings > Roles) until an admin sets a password from the Roles page,
+// which is then stored only in the Google Sheet, never in source control.
+const seedStaff: Staff[] = [
+  { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both" },
 ];
 
-const seedStaff: Staff[] = [
-  { id: "ST-001", name: "Avinash G", email: "g.avinash10005@gmail.com", role: "Admin", status: "Active", access: "Both" },
-  { id: "ST-002", name: "Rajesh Jain", email: "rajesh@jainfinance.com", role: "Admin", status: "Active", access: "Both" },
-  { id: "ST-003", name: "Sunil Verma", email: "sunil@jainfinance.com", role: "Staff", status: "Active", access: "Finance" },
-  { id: "ST-004", name: "Ramesh Shah", email: "ramesh@jainfinance.com", role: "Staff", status: "Active", access: "Mobiles" },
-];
 
 // ── Login Rate Limiting ──────────────────────────────────────────────────────
 // Track failed login attempts in-memory (resets on page reload — intentional for UX)
@@ -471,10 +495,10 @@ type State = {
 
   toggleDarkMode: () => void;
   login: (email: string) => boolean;
-  loginWithPassword: (email: string, password: string) => boolean;
+  loginWithPassword: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  addStaff: (input: { name: string; email: string; role: string; access?: "Finance" | "Mobiles" | "Both"; password?: string }) => Staff;
-  updateStaff: (id: string, input: Partial<Omit<Staff, "id">>) => Staff | undefined;
+  addStaff: (input: { name: string; email: string; role: string; access?: "Finance" | "Mobiles" | "Both"; password?: string }) => Promise<Staff>;
+  updateStaff: (id: string, input: Partial<Omit<Staff, "id">>) => Promise<Staff | undefined>;
   deleteStaff: (id: string) => void;
   deleteCustomer: (id: string) => void;
   deleteLoan: (id: string) => void;
@@ -509,11 +533,11 @@ type State = {
     fileCharge?: number;
   }) => Customer | undefined;
   addLoan: (input: { customer: string; product: string; amount: number; deposit: number; interest: number; months: number }) => Loan;
-  recordPayment: (input: { customerId: string; amount: number; method: Payment["method"]; collector: string; remarks: string; date?: string }) => void;
+  recordPayment: (input: { customerId: string; amount: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => void;
   collectEmi: (input: { collectionId: string; method: Collection["method"] }) => void;
   receiveCustomPayment: (input: { customer: string; amount: number; method: Payment["method"]; collector: string }) => void;
-  addExpense: (input: { cat: string; desc: string; amount: number; type?: "Income" | "Expense"; date?: string; method?: "Cash" | "UPI" }) => Expense;
-  addInvestment: (input: { investor: string; amount: number; roi: number; maturity: string; date?: string; method?: "Cash" | "UPI" }) => Investment;
+  addExpense: (input: { cat: string; desc: string; amount: number; type?: "Income" | "Expense"; date?: string; method?: Expense["method"] }) => Expense;
+  addInvestment: (input: { investor: string; amount: number; roi: number; maturity: string; date?: string; method?: Investment["method"] }) => Investment;
   sendWhatsapp: (input: { to: string; kind: string }) => void;
   markAllNotificationsRead: () => void;
   markNotificationRead: (id: string) => void;
@@ -525,6 +549,88 @@ type State = {
   syncToSheets: () => Promise<{ ok: boolean; error?: string }>;
   loadFromSheets: () => Promise<{ ok: boolean; error?: string }>;
 };
+
+// ── Sheet row shape builders ──────────────────────────────────────────────────
+// Single source of truth for how each entity maps to its sheet's columns —
+// used both by the full-table syncToSheets() below and by the per-record
+// upsert/delete calls each mutator makes. Keeping one function per entity
+// means the two paths can never drift out of sync with each other.
+function customerRow(c: Customer): SheetRow {
+  return {
+    id: c.id, billDate: c.billDate || "",
+    firstName: c.firstName || "", fatherName: c.fatherName || "", surname: c.surname || "",
+    name: c.name, mobile: c.mobile, aadhaar: c.aadhaar || "",
+    guarantyName: c.guarantyName || "", guarantyMobile: c.guarantyMobile || "",
+    region: c.region || "", village: c.village || "",
+    mobileBrand: c.mobileBrand || "", mobileModel: c.mobileModel || "", ramRom: c.ramRom || "",
+    imei1: c.imei1 || "", imei2: c.imei2 || "",
+    price: c.price, fileCharge: c.fileCharge, deposit: c.deposit,
+    balanceForEmi: c.balanceForEmi, interestRate: c.interestRate,
+    interestPerMonth: c.interestPerMonth, noOfEmi: c.noOfEmi,
+    totalInterest: c.totalInterest, totalEmiAmount: c.totalEmiAmount,
+    perMonthEmi: c.perMonthEmi, emiDate: c.emiDate || "",
+    paidEmis: c.paidEmis, pendingEmis: c.pendingEmis,
+    pendingAmount: c.pendingAmount,
+    lastPaymentDate: c.lastPaymentDate || "—",
+    lastPaymentAmt: c.lastPaymentAmt,
+    status: c.status, missedEmis: c.missedEmis ?? 0,
+    loan: c.loan || "", emi: c.emi || "", due: c.due || "",
+  };
+}
+function paymentRow(p: Payment): SheetRow {
+  return {
+    id: p.id, customer: p.customer, customerId: p.customerId || "",
+    amount: p.amount, method: p.method,
+    cashAmount: p.cashAmount ?? "", bankAmount: p.bankAmount ?? "",
+    date: p.date, collector: p.collector, remarks: p.remarks || "",
+    pending: p.pending || "", status: p.status || "Success",
+  };
+}
+function expenseRow(e: Expense): SheetRow {
+  return {
+    id: e.id, date: e.date, cat: e.cat, desc: e.desc,
+    amount: e.amount, type: e.type ?? "Expense", method: e.method ?? "Cash",
+  };
+}
+function investmentRow(inv: Investment): SheetRow {
+  return {
+    id: inv.id, investor: inv.investor, amount: inv.amount,
+    roi: inv.roi, maturity: inv.maturity, status: inv.status,
+    date: inv.date ?? "", method: inv.method ?? "Cash",
+  };
+}
+function staffRow(s: Staff): SheetRow {
+  return {
+    id: s.id, name: s.name, email: s.email, role: s.role,
+    status: s.status, access: s.access || "Both",
+    // Legacy plaintext, kept only until this row is migrated on next login.
+    password: s.password || "",
+    passwordHash: s.passwordHash || "", passwordSalt: s.passwordSalt || "",
+  };
+}
+
+// ── Per-record sync helpers ─────────────────────────────────────────────────
+// Mutators call these instead of the full syncToSheets() so a single add/
+// edit/delete only ever touches its own row(s) on the shared sheet. Full
+// syncToSheets() rewrites EVERY row of an entire sheet from this device's
+// local array — fine for a manual "Sync Now", but firing it after every
+// single mutation meant two devices changing different records within the
+// same few seconds would each overwrite the other's change (last full
+// rewrite wins). Targeted upsert/delete calls only ever affect the record
+// they're given, so unrelated concurrent edits from other devices can't be
+// clobbered.
+function syncUpsert(get: () => State, sheet: SheetName, row: SheetRow, label: string) {
+  const { sheetsConfig } = get();
+  if (sheetsConfig.enabled && sheetsConfig.url) {
+    upsertRow(sheetsConfig.url, sheet, row).catch((err) => console.warn(`[Store] Immediate ${label} sync failed:`, err));
+  }
+}
+function syncDelete(get: () => State, sheet: SheetName, id: string, label: string) {
+  const { sheetsConfig } = get();
+  if (sheetsConfig.enabled && sheetsConfig.url) {
+    deleteRow(sheetsConfig.url, sheet, id).catch((err) => console.warn(`[Store] Immediate ${label} sync failed:`, err));
+  }
+}
 
 // ── PERMANENT GOOGLE SHEETS DATABASE URL ─────────────────────────────────────
 // This URL is permanently baked into the app — no manual configuration needed.
@@ -571,34 +677,60 @@ export const useStore = create<State>()(
         return false;
       },
 
-      loginWithPassword: (email, password) => {
+      loginWithPassword: async (email, password) => {
         const cleanEmail = email.trim().toLowerCase();
         const cleanPass = password.trim();
         const found = get().staff.find(
-          (s) =>
-            s.email.toLowerCase() === cleanEmail &&
-            s.status === "Active" &&
-            (s.password ? s.password === cleanPass : true)
+          (s) => s.email.toLowerCase() === cleanEmail && s.status === "Active"
         );
-        if (found) {
+        if (!found) return false;
+
+        if (found.passwordHash && found.passwordSalt) {
+          const computed = await hashPassword(cleanPass, found.passwordSalt);
+          if (computed !== found.passwordHash) return false;
+        } else if (found.password) {
+          // Legacy plaintext account from before hashing was added. Verify
+          // directly, then opportunistically migrate it to a salted hash so
+          // the plaintext never sits in the sheet/localStorage again.
+          if (found.password !== cleanPass) return false;
+          const passwordSalt = generateSalt();
+          const passwordHash = await hashPassword(cleanPass, passwordSalt);
+          const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
+          set((s) => ({
+            staff: s.staff.map((m) => (m.id === found.id ? migrated : m)),
+            currentUser: migrated,
+          }));
+          syncUpsert(get, "Finance_Staff", staffRow(migrated), "staff password migration");
           clearLoginFailures(cleanEmail);
-          set({ currentUser: found });
           return true;
+        } else {
+          // No password set at all — must not match any arbitrary password,
+          // only OTP can sign this account in.
+          return false;
         }
-        return false;
+
+        clearLoginFailures(cleanEmail);
+        set({ currentUser: found });
+        return true;
       },
 
       logout: () => {
         set({ currentUser: null });
       },
 
-      addStaff: (input) => {
+      addStaff: async (input) => {
         const existing = get().staff;
         const maxId = existing.reduce((max, s) => {
           const n = parseInt(s.id.replace("ST-", ""), 10);
           return isNaN(n) ? max : Math.max(max, n);
         }, 0);
         const id = "ST-" + (maxId + 1).toString().padStart(3, "0");
+        let passwordHash: string | undefined;
+        let passwordSalt: string | undefined;
+        if (input.password && input.password.trim()) {
+          passwordSalt = generateSalt();
+          passwordHash = await hashPassword(input.password.trim(), passwordSalt);
+        }
         const newMember: Staff = {
           id,
           name: input.name,
@@ -606,7 +738,8 @@ export const useStore = create<State>()(
           role: input.role,
           status: "Active",
           access: input.access || "Both",
-          password: input.password || "",
+          passwordHash,
+          passwordSalt,
         };
         set((s) => ({
           staff: [...s.staff, newMember],
@@ -620,21 +753,35 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        // Trigger immediate background sync to Google Sheets
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate staff add sync failed:", err));
+        syncUpsert(get, "Finance_Staff", staffRow(newMember), "staff add");
         return newMember;
       },
 
-      updateStaff: (id, input) => {
+      updateStaff: async (id, input) => {
         const existing = get().staff.find((s) => s.id === id);
         if (!existing) return undefined;
+        // A blank password field means "leave it unchanged" — the UI never
+        // shows an existing password back (hashes aren't reversible, and
+        // showing a legacy plaintext one back would just be bad practice),
+        // so treating blank as "clear the password" would silently lock
+        // the account out of password login on every unrelated edit.
+        let passwordHash = existing.passwordHash;
+        let passwordSalt = existing.passwordSalt;
+        let legacyPassword = existing.password;
+        if (input.password && input.password.trim()) {
+          passwordSalt = generateSalt();
+          passwordHash = await hashPassword(input.password.trim(), passwordSalt);
+          legacyPassword = undefined;
+        }
         const updated: Staff = {
           ...existing,
           name: input.name ?? existing.name,
           email: input.email ?? existing.email,
           role: input.role ?? existing.role,
           access: input.access ?? existing.access,
-          password: input.password !== undefined ? input.password : existing.password,
+          password: legacyPassword,
+          passwordHash,
+          passwordSalt,
           status: input.status ?? existing.status,
         };
         set((s) => ({
@@ -650,8 +797,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        // Trigger immediate background sync to Google Sheets
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate staff update sync failed:", err));
+        syncUpsert(get, "Finance_Staff", staffRow(updated), "staff update");
         return updated;
       },
 
@@ -669,12 +815,12 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        // Trigger immediate background sync to Google Sheets
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate staff delete sync failed:", err));
+        syncDelete(get, "Finance_Staff", id, "staff delete");
       },
 
       deleteCustomer: (id) => {
         const found = get().customers.find((c) => c.id === id);
+        const orphanedPaymentIds = get().payments.filter((p) => p.customerId === id).map((p) => p.id);
         set((s) => ({
           customers: s.customers.filter((c) => c.id !== id),
           collections: s.collections.filter((col) => col.customerId !== id),
@@ -690,7 +836,13 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate customer delete sync failed:", err));
+        // Mirror the local cascade: remove the customer row and every
+        // payment row that referenced it, individually — not a full
+        // table rewrite that could also discard other devices' changes.
+        syncDelete(get, "Finance_Customers", id, "customer delete");
+        orphanedPaymentIds.forEach((pid) => {
+          syncDelete(get, "Finance_Payments", pid, "cascaded payment delete");
+        });
       },
 
       deleteLoan: (id) => {
@@ -777,7 +929,13 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate payment delete sync failed:", err));
+        syncDelete(get, "Finance_Payments", id, "payment delete");
+        if (p.customerId) {
+          const revertedCust = get().customers.find((c) => c.id === p.customerId);
+          if (revertedCust) {
+            syncUpsert(get, "Finance_Customers", customerRow(revertedCust), "customer sync (from payment delete)");
+          }
+        }
       },
 
       deleteExpense: (id) => {
@@ -794,7 +952,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate expense delete sync failed:", err));
+        syncDelete(get, "Finance_Expenses", id, "expense delete");
       },
 
       deleteInvestment: (id) => {
@@ -811,7 +969,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate investment delete sync failed:", err));
+        syncDelete(get, "Finance_Investments", id, "investment delete");
       },
 
       deleteDocument: (id) => {
@@ -879,7 +1037,7 @@ export const useStore = create<State>()(
           due: input.emiDate,
         };
         // Also add to collections due list
-        const colId = "C-" + (get().collections.length + 1).toString().padStart(3, "0");
+        const colId = nextSeqId("C-", get().collections.map((x) => x.id));
         const collection: Collection = {
           id: colId,
           name: customer.name,
@@ -1050,11 +1208,14 @@ export const useStore = create<State>()(
             ...s.notifications,
           ],
           audit: [
-            { ts: new Date().toLocaleString("en-IN"), user: "Rajesh Jain", action: "Registered customer", target: `${id} ${customer.name} – ${input.mobileBrand} ${input.mobileModel}` },
+            { ts: new Date().toLocaleString("en-IN"), user: s.currentUser?.name || "System", action: "Registered customer", target: `${id} ${customer.name} – ${input.mobileBrand} ${input.mobileModel}` },
             ...s.audit,
           ],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate customer add sync failed:", err));
+        // Per-record upsert — touches only this customer's row, so it can't
+        // clobber another device's concurrently-added/edited customer the
+        // way a full-table rewrite would (see upsertRow's doc comment).
+        syncUpsert(get, "Finance_Customers", customerRow(customer), "customer add");
         return customer;
       },
 
@@ -1122,7 +1283,7 @@ export const useStore = create<State>()(
           audit: [
             {
               ts: new Date().toLocaleString("en-IN"),
-              user: "Rajesh Jain",
+              user: s.currentUser?.name || "System",
               action: "Updated customer details",
               target: `${id} ${updated.name}`,
             },
@@ -1130,14 +1291,14 @@ export const useStore = create<State>()(
           ],
         }));
 
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate customer update sync failed:", err));
+        syncUpsert(get, "Finance_Customers", customerRow(updated), "customer update");
         return updated;
       },
 
-      recordPayment: ({ customerId, amount, method, collector, remarks, date }) => {
+      recordPayment: ({ customerId, amount, method, collector, remarks, date, cashAmount, bankAmount }) => {
         const cust = get().customers.find((c) => c.id === customerId);
         if (!cust) return;
-        const txnId = "TXN-" + (get().payments.length + 1).toString().padStart(3, "0");
+        const txnId = nextSeqId("TXN-", get().payments.map((x) => x.id));
         const newPaidEmis = Math.min(cust.paidEmis + 1, cust.noOfEmi);
         const newPendingEmis = cust.noOfEmi - newPaidEmis;
         const newPendingAmount = newPendingEmis * cust.perMonthEmi;
@@ -1165,7 +1326,7 @@ export const useStore = create<State>()(
             c.customerId === customerId ? { ...c, state: "Collected" as const, method } : c
           ),
           payments: [
-            { id: txnId, customer: cust.name, customerId, date: pDate, amount: fmtInr(amount), pending: fmtInr(newPendingAmount), collector, method, status: "Success", remarks },
+            { id: txnId, customer: cust.name, customerId, date: pDate, amount: fmtInr(amount), pending: fmtInr(newPendingAmount), collector, method, cashAmount, bankAmount, status: "Success", remarks },
             ...s.payments,
           ],
           notifications: [
@@ -1177,7 +1338,18 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate payment sync failed:", err));
+        // Two targeted upserts (new payment row + this one customer's row)
+        // instead of a full-table rewrite of both sheets — so a second
+        // collector recording a different payment at the same moment can't
+        // overwrite this payment or this customer's updated EMI counters.
+        const newPayment = get().payments.find((p) => p.id === txnId);
+        const updatedCust = get().customers.find((c) => c.id === customerId);
+        if (newPayment) {
+          syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "payment");
+        }
+        if (updatedCust) {
+          syncUpsert(get, "Finance_Customers", customerRow(updatedCust), "customer sync (from payment)");
+        }
       },
 
       addLoan: (input) => {
@@ -1215,14 +1387,12 @@ export const useStore = create<State>()(
       },
 
       receiveCustomPayment: ({ customer, amount, method, collector }) => {
-        const txnId = "TXN-" + (get().payments.length + 1).toString().padStart(3, "0");
+        const txnId = nextSeqId("TXN-", get().payments.map((x) => x.id));
+        const newPayment: Payment = { id: txnId, customer, customerId: "", date: today(), amount: fmtInr(amount), pending: "—", collector, method, status: "Success", remarks: "" };
         set((s) => ({
-          payments: [
-            { id: txnId, customer, customerId: "", date: today(), amount: fmtInr(amount), pending: "—", collector, method, status: "Success", remarks: "" },
-            ...s.payments,
-          ],
+          payments: [newPayment, ...s.payments],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate custom payment sync failed:", err));
+        syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "custom payment");
       },
 
       addExpense: (input) => {
@@ -1243,9 +1413,9 @@ export const useStore = create<State>()(
         };
         set((s) => ({
           expenses: [expense, ...s.expenses],
-          audit: [{ ts: new Date().toLocaleString("en-IN"), user: "Rajesh Jain", action: `Added ${expense.type?.toLowerCase() || "expense"}`, target: `${id} · ${expense.amount}` }, ...s.audit],
+          audit: [{ ts: new Date().toLocaleString("en-IN"), user: s.currentUser?.name || "System", action: `Added ${expense.type?.toLowerCase() || "expense"}`, target: `${id} · ${expense.amount}` }, ...s.audit],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate expense sync failed:", err));
+        syncUpsert(get, "Finance_Expenses", expenseRow(expense), "expense");
         return expense;
       },
 
@@ -1264,9 +1434,9 @@ export const useStore = create<State>()(
         };
         set((s) => ({
           investments: [investment, ...s.investments],
-          audit: [{ ts: new Date().toLocaleString("en-IN"), user: "Rajesh Jain", action: "Added investment", target: `${id} · ${investment.amount}` }, ...s.audit],
+          audit: [{ ts: new Date().toLocaleString("en-IN"), user: s.currentUser?.name || "System", action: "Added investment", target: `${id} · ${investment.amount}` }, ...s.audit],
         }));
-        get().syncToSheets().catch((err) => console.warn("[Store] Immediate investment sync failed:", err));
+        syncUpsert(get, "Finance_Investments", investmentRow(investment), "investment");
         return investment;
       },
 
@@ -1305,7 +1475,11 @@ export const useStore = create<State>()(
       pushAudit: (e) => set((s) => ({ audit: [{ ts: new Date().toLocaleString("en-IN"), ...e }, ...s.audit] })),
 
       resetSeed: () => {
-        // 1. Reset local state to empty (NOT seed data)
+        // 1. Reset local state to empty (NOT seed data). The staff directory
+        // is deliberately left untouched — the confirmation dialog for this
+        // action only promises to clear customers/payments/expenses/
+        // investments, and wiping everyone else's login out from under them
+        // (including on the shared sheet) would lock the team out.
         set({
           customers: [], loans: [], collections: [],
           payments: [], expenses: [], investments: [],
@@ -1335,45 +1509,11 @@ export const useStore = create<State>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          await writeSheet(sheetsConfig.url, "Finance_Customers", customers.map((c) => ({
-            id: c.id, billDate: c.billDate || "",
-            firstName: c.firstName || "", fatherName: c.fatherName || "", surname: c.surname || "",
-            name: c.name, mobile: c.mobile, aadhaar: c.aadhaar || "",
-            guarantyName: c.guarantyName || "", guarantyMobile: c.guarantyMobile || "",
-            region: c.region || "", village: c.village || "",
-            mobileBrand: c.mobileBrand || "", mobileModel: c.mobileModel || "", ramRom: c.ramRom || "",
-            imei1: c.imei1 || "", imei2: c.imei2 || "",
-            price: c.price, fileCharge: c.fileCharge, deposit: c.deposit,
-            balanceForEmi: c.balanceForEmi, interestRate: c.interestRate,
-            interestPerMonth: c.interestPerMonth, noOfEmi: c.noOfEmi,
-            totalInterest: c.totalInterest, totalEmiAmount: c.totalEmiAmount,
-            perMonthEmi: c.perMonthEmi, emiDate: c.emiDate || "",
-            paidEmis: c.paidEmis, pendingEmis: c.pendingEmis,
-            pendingAmount: c.pendingAmount,
-            lastPaymentDate: c.lastPaymentDate || "—",
-            lastPaymentAmt: c.lastPaymentAmt,
-            status: c.status, missedEmis: c.missedEmis ?? 0,
-            loan: c.loan || "", emi: c.emi || "", due: c.due || "",
-          })));
-          await writeSheet(sheetsConfig.url, "Finance_Payments", payments.map((p) => ({
-            id: p.id, customer: p.customer, customerId: p.customerId || "",
-            amount: p.amount, method: p.method,
-            date: p.date, collector: p.collector, remarks: p.remarks || "",
-            pending: p.pending || "", status: p.status || "Success",
-          })));
-          await writeSheet(sheetsConfig.url, "Finance_Expenses", expenses.map((e) => ({
-            id: e.id, date: e.date, cat: e.cat, desc: e.desc,
-            amount: e.amount, type: e.type ?? "Expense", method: e.method ?? "Cash",
-          })));
-          await writeSheet(sheetsConfig.url, "Finance_Investments", investments.map((inv) => ({
-            id: inv.id, investor: inv.investor, amount: inv.amount,
-            roi: inv.roi, maturity: inv.maturity, status: inv.status,
-            date: inv.date ?? "", method: inv.method ?? "Cash",
-          })));
-          await writeSheet(sheetsConfig.url, "Finance_Staff", staff.map((s) => ({
-            id: s.id, name: s.name, email: s.email, role: s.role,
-            status: s.status, access: s.access || "Both", password: s.password || "",
-          })));
+          await writeSheet(sheetsConfig.url, "Finance_Customers", customers.map(customerRow));
+          await writeSheet(sheetsConfig.url, "Finance_Payments", payments.map(paymentRow));
+          await writeSheet(sheetsConfig.url, "Finance_Expenses", expenses.map(expenseRow));
+          await writeSheet(sheetsConfig.url, "Finance_Investments", investments.map(investmentRow));
+          await writeSheet(sheetsConfig.url, "Finance_Staff", staff.map(staffRow));
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -1421,6 +1561,8 @@ export const useStore = create<State>()(
             ...r,
             customerId: String(r.customerId || ""),
             status: (r.status || "Success") as "Success" | "Refunded",
+            cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
+            bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
           }));
           set({ payments: sanitizedPay as unknown as Payment[] });
 
@@ -1428,16 +1570,22 @@ export const useStore = create<State>()(
           set({ investments: invRows as unknown as Investment[] });
 
           if (staffRows.length > 0) {
-            const mappedStaff = staffRows.map((r: any) => ({
-              id: String(r.id || ""),
-              name: String(r.name || ""),
-              email: String(r.email || ""),
-              role: String(r.role || "Staff"),
-              status: (r.status || "Active") as "Active" | "Inactive",
-              access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
-              password: String(r.password || ""),
-            }));
-            set({ staff: mappedStaff });
+            const mappedStaff = staffRows
+              .filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()))
+              .map((r: any) => ({
+                id: String(r.id || ""),
+                name: String(r.name || ""),
+                email: String(r.email || ""),
+                role: String(r.role || "Staff"),
+                status: (r.status || "Active") as "Active" | "Inactive",
+                access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
+                password: r.password ? String(r.password) : undefined,
+                passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
+                passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
+              }));
+            if (mappedStaff.length > 0) {
+              set({ staff: mappedStaff });
+            }
           }
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
@@ -1458,9 +1606,11 @@ export const useStore = create<State>()(
         merged.expenses = Array.isArray(merged.expenses) ? merged.expenses : seedExpenses;
         merged.investments = Array.isArray(merged.investments) ? merged.investments : seedInvestments;
         merged.notifications = Array.isArray(merged.notifications) ? merged.notifications : seedNotifications;
-        merged.audit = Array.isArray(merged.audit) && merged.audit.length > 0 ? merged.audit : seedAudit;
+        merged.audit = Array.isArray(merged.audit) ? merged.audit : [];
         merged.documents = Array.isArray(merged.documents) ? merged.documents : [];
-        merged.staff = Array.isArray(merged.staff) ? merged.staff : seedStaff;
+        merged.staff = Array.isArray(merged.staff) && merged.staff.length > 0
+          ? merged.staff.filter((s: any) => (s.name && String(s.name).trim()) || (s.email && String(s.email).trim()))
+          : seedStaff;
         // Preserve user configured or disconnected sheetsConfig, fallback to PERMANENT_SHEETS_URL if undefined
         merged.sheetsConfig = {
           url: merged.sheetsConfig?.url ?? PERMANENT_SHEETS_URL,
@@ -1473,38 +1623,17 @@ export const useStore = create<State>()(
   )
 );
 
-// ── Auto-push to Sheets on every Finance data mutation ──────────────────────
-// Debounced: waits 3s after last change, then syncs in background.
-// This means every add/edit/delete automatically syncs without manual button click.
-let _financeAutoSyncTimer: ReturnType<typeof setTimeout> | null = null;
-let _lastFinCustomers = useStore.getState().customers;
-let _lastFinPayments = useStore.getState().payments;
-let _lastFinExpenses = useStore.getState().expenses;
-let _lastFinInvestments = useStore.getState().investments;
-let _lastFinStaff = useStore.getState().staff;
-
-useStore.subscribe((state) => {
-  if (!state.sheetsConfig.enabled || !state.sheetsConfig.url) return;
-
-  if (
-    state.customers !== _lastFinCustomers ||
-    state.payments !== _lastFinPayments ||
-    state.expenses !== _lastFinExpenses ||
-    state.investments !== _lastFinInvestments ||
-    state.staff !== _lastFinStaff
-  ) {
-    _lastFinCustomers = state.customers;
-    _lastFinPayments = state.payments;
-    _lastFinExpenses = state.expenses;
-    _lastFinInvestments = state.investments;
-    _lastFinStaff = state.staff;
-
-    if (_financeAutoSyncTimer) clearTimeout(_financeAutoSyncTimer);
-    _financeAutoSyncTimer = setTimeout(() => {
-      useStore.getState().syncToSheets().catch(() => {/* silent */});
-    }, 3000);
-  }
-});
+// NOTE: there used to be a debounced subscriber here that did a full
+// syncToSheets() 3s after ANY change to customers/payments/expenses/
+// investments/staff. That's been removed — every mutator above now pushes
+// its own targeted upsert/delete immediately (see syncUpsert/syncDelete),
+// which is what actually fixed the lost-update race. A delayed FULL
+// rewrite firing on top of that would just reintroduce the exact same
+// race it used to cause: it could overwrite another device's targeted
+// change made in that 3s window with this device's (possibly stale-by-
+// then) full local snapshot. syncToSheets() itself is intentionally still
+// used for the manual "Sync Now" button and initial connect, where a full
+// rewrite is exactly what's wanted.
 
 
 export function downloadCsv(filename: string, rows: Record<string, unknown>[]) {

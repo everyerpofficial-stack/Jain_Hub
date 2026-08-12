@@ -49,6 +49,16 @@ export type SheetRow = Record<string, string | number | boolean | undefined | nu
 const CHUNK_BYTES = 40_000;
 
 /**
+ * Shared secret sent with every data request, checked by Code.gs against
+ * its Script Property "API_KEY" (see google-apps-script/Code.gs setup
+ * notes). Set VITE_SHEETS_API_KEY in .env to enable this check — until
+ * then Code.gs runs with no key requirement, matching prior behavior.
+ */
+function getApiKey(): string {
+  return (import.meta.env.VITE_SHEETS_API_KEY as string) || "";
+}
+
+/**
  * Safely base64-encode a string (works in all browsers)
  */
 function b64Encode(str: string): string {
@@ -67,7 +77,9 @@ async function getFromScript(
   url: string,
   params: Record<string, string>
 ): Promise<Record<string, unknown>> {
-  const qs = Object.entries(params)
+  const apiKey = getApiKey();
+  const allParams = apiKey ? { ...params, key: apiKey } : params;
+  const qs = Object.entries(allParams)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&");
 
@@ -154,6 +166,35 @@ export async function appendRow(
   row: SheetRow
 ): Promise<void> {
   await writeChunked(url, "append", sheet, [row]);
+}
+
+/**
+ * Update-or-insert a single row by its `id` field, touching only that row.
+ * This is the preferred way to sync an individual add/edit — unlike
+ * writeSheet() (which rewrites the ENTIRE sheet from this device's local
+ * array), it can't clobber a record another device added or edited in the
+ * same few seconds, since it only ever touches the one row it's given.
+ */
+export async function upsertRow(
+  url: string,
+  sheet: SheetName,
+  row: SheetRow
+): Promise<void> {
+  if (!row.id) throw new Error("upsertRow: row must have an 'id' field");
+  const payload = b64Encode(JSON.stringify(row));
+  await getFromScript(url, { action: "upsert", sheet, payload });
+}
+
+/**
+ * Delete a single row by id, touching only that row — same rationale as
+ * upsertRow() above (avoids a full-sheet rewrite for a one-record change).
+ */
+export async function deleteRow(
+  url: string,
+  sheet: SheetName,
+  id: string
+): Promise<void> {
+  await getFromScript(url, { action: "delete", sheet, id });
 }
 
 /**

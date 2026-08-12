@@ -9,6 +9,17 @@ import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 import { MultiSelect } from "@/components/ui/multi-select";
 
+/** Escape HTML special chars to prevent XSS when inserting user data into innerHTML */
+function escapeHtml(str: unknown): string {
+  if (str === undefined || str === null || str === "") return "—";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 const generateDueListPdf = (list: any[]) => {
   const printWindow = window.open("", "_blank");
   if (!printWindow) {
@@ -25,11 +36,11 @@ const generateDueListPdf = (list: any[]) => {
   const rowsHtml = list.map((c, i) => `
     <tr style="border-bottom: 1px solid #e2e8f0;">
       <td style="padding: 8px 10px; text-align: center;">${i + 1}</td>
-      <td style="padding: 8px 10px;">${c.emiDate}</td>
-      <td style="padding: 8px 10px;"><strong>${c.name}</strong></td>
-      <td style="padding: 8px 10px;">${c.fatherName || "—"}</td>
-      <td style="padding: 8px 10px;">${c.village}</td>
-      <td style="padding: 8px 10px;">${c.mobile}</td>
+      <td style="padding: 8px 10px;">${escapeHtml(c.emiDate)}</td>
+      <td style="padding: 8px 10px;"><strong>${escapeHtml(c.name)}</strong></td>
+      <td style="padding: 8px 10px;">${escapeHtml(c.fatherName)}</td>
+      <td style="padding: 8px 10px;">${escapeHtml(c.village)}</td>
+      <td style="padding: 8px 10px;">${escapeHtml(c.mobile)}</td>
       <td style="padding: 8px 10px; text-align: right;">${safeFormatInr(c.perMonthEmi)}</td>
       <td style="padding: 8px 10px; text-align: center;">${c.pendingEmis}</td>
       <td style="padding: 8px 10px; text-align: right; font-weight: 600; color: #b91c1c;">${safeFormatInr(c.pendingAmount)}</td>

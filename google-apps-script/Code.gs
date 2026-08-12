@@ -14,6 +14,20 @@
  *  5. Copy the Web App URL → paste in the app Settings page
  *     (same URL works for BOTH Finance and Mobiles)
  *
+ *  6. SECURITY — set a shared API key (STRONGLY recommended):
+ *     - Project Settings (gear icon) → Script Properties → Add property
+ *       Name: API_KEY   Value: <a long random string you generate yourself>
+ *     - Put the SAME value in the app's .env as VITE_SHEETS_API_KEY and
+ *       rebuild/redeploy the app. Every read/write/delete/digest request
+ *       will then be rejected unless it carries this key.
+ *     - Without this, ANYONE who has this Web App URL (it ships inside
+ *       the app's public JS bundle — trivial to find in devtools) can
+ *       read, overwrite, or delete every row in your spreadsheet, since
+ *       "Who has access: Anyone" means no Google-account check happens.
+ *       The key does not make this fully server-secure (it still ships
+ *       to the browser), but it blocks casual scraping/scanning and lets
+ *       you rotate access instantly by changing the Script Property.
+ *
  *  WHY ALL GET?
  *   Google Apps Script redirects POST requests from script.google.com
  *   to script.googleusercontent.com. Browsers block this cross-origin
@@ -23,10 +37,16 @@
  *  API (all GET):
  *   ?action=ping                                  → health check
  *   ?action=sendOtp&email=X&otp=Y&system=Z        → send OTP via Gmail
- *   ?action=read&sheet=<name>                     → read all rows
- *   ?action=write&sheet=<name>&payload=<b64json>  → clear + write rows
- *   ?action=append&sheet=<name>&payload=<b64json> → append rows
- *   ?action=delete&sheet=<name>&id=<rowId>        → delete row by ID
+ *                                                    (email must belong to
+ *                                                    an Active Finance_Staff
+ *                                                    row — otherwise rejected)
+ *   ?action=read&sheet=<name>&key=<API_KEY>                     → read all rows
+ *   ?action=write&sheet=<name>&payload=<b64json>&key=<API_KEY>  → clear + write rows
+ *   ?action=append&sheet=<name>&payload=<b64json>&key=<API_KEY> → append rows
+ *   ?action=upsert&sheet=<name>&payload=<b64json>&key=<API_KEY> → update-or-insert ONE row by its id
+ *                                                                  (preferred over write/append for
+ *                                                                  single-record add/edit — see below)
+ *   ?action=delete&sheet=<name>&id=<rowId>&key=<API_KEY>        → delete row by ID
  * =====================================================================
  */
 
@@ -57,13 +77,44 @@ var ALLOWED_SHEETS = [
 
 // ── Main GET Handler ──────────────────────────────────────────────────────────
 function doGet(e) {
+  var lock = null;
   try {
     var action    = (e && e.parameter && e.parameter.action)  || "";
     var sheetName = (e && e.parameter && e.parameter.sheet)   || "";
     var payload   = (e && e.parameter && e.parameter.payload) || "";
+    var reqKey    = (e && e.parameter && e.parameter.key)     || "";
+
+    // ── Script-wide lock for every action that touches the spreadsheet ──
+    // A "write" does clearContents() then setValues() as two separate
+    // calls with no atomicity of its own. Without this lock, a "read"
+    // from another device/poll can land in between those two calls and
+    // see a transiently empty sheet — which the client (reasonably)
+    // treats as "the data was really deleted" and wipes its local copy.
+    // Serializing every sheet-touching request through one lock removes
+    // that window entirely, at the cost of requests queueing briefly
+    // when two happen at the exact same moment (rare for this app's
+    // traffic, and far cheaper than a data-loss bug).
+    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest") {
+      lock = LockService.getScriptLock();
+      var gotLock = lock.tryLock(10000);
+      if (!gotLock) {
+        lock = null;
+        return jsonResponse({ status: "error", error: "Server busy, please retry" });
+      }
+    }
 
     // ── 0. Guard: check spreadsheet ID is configured ──────────────────
     var isConfigured = (SPREADSHEET_ID && SPREADSHEET_ID !== "YOUR_SPREADSHEET_ID_HERE" && SPREADSHEET_ID.length > 10);
+
+    // ── 0b. Guard: shared API key (if configured via Script Properties) ─
+    // Gates every data-bearing action. "ping" stays open so the Settings
+    // page can sanity-check connectivity before a key is even set up.
+    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest") {
+      var configuredKey = PropertiesService.getScriptProperties().getProperty("API_KEY") || "";
+      if (configuredKey && reqKey !== configuredKey) {
+        return jsonResponse({ status: "error", error: "Unauthorized: invalid or missing API key" });
+      }
+    }
 
     // ── 1. Health check ────────────────────────────────────────────────
     if (action === "ping") {
@@ -100,8 +151,12 @@ function doGet(e) {
           } else {
             var rowCount = sh0.getLastRow() - 1;
             var colCount = sh0.getLastColumn();
-            // Create a lightweight content fingerprint using row count, column count, and cell data length
-            var valSample = sh0.getRange(1, 1, Math.min(rowCount + 1, 100), colCount).getValues();
+            // Create a lightweight content fingerprint using row count, column count, and cell data length.
+            // Sampled up to 5000 rows (not just the first 100) — a smaller cap meant edits to any row
+            // beyond it never changed the digest, so the poller on other devices never noticed and kept
+            // showing stale data indefinitely once a sheet grew past that size.
+            var sampleRows = Math.min(rowCount + 1, 5000);
+            var valSample = sh0.getRange(1, 1, sampleRows, colCount).getValues();
             var sampleStr = valSample.join("");
             digest[sheetNameItem] = rowCount + "_" + sampleStr.length + "_" + colCount;
           }
@@ -115,13 +170,36 @@ function doGet(e) {
     // ── 3. Send OTP via Gmail ──────────────────────────────────────────
 
     if (action === "sendOtp") {
-      var email      = (e.parameter.email  || "").trim();
+      var email      = (e.parameter.email  || "").trim().toLowerCase();
       var otp        = (e.parameter.otp    || "").trim();
-      var systemName = (e.parameter.system || "Jain Finance & Mobiles Hub").trim();
+      var systemName = "Jain Finance & Mobiles Hub"; // fixed — never taken from the request
 
       if (!email || !otp) {
         return jsonResponse({ status: "error", error: "Missing email or otp parameter" });
       }
+      // Otp must be exactly 6 digits — rejects anything crafted to inject
+      // markup/script into the email body via this parameter.
+      if (!/^\d{6}$/.test(otp)) {
+        return jsonResponse({ status: "error", error: "Invalid otp format" });
+      }
+      // Without this check, this endpoint is an open mail relay: anyone who
+      // finds the Web App URL (it ships in the public JS bundle) could make
+      // this Gmail account send arbitrary "verification" emails to any
+      // address on the internet — a spam/phishing vector using your
+      // business's identity. Only allow sending to a currently Active
+      // Finance_Staff email.
+      if (!isActiveStaffEmail(email)) {
+        return jsonResponse({ status: "error", error: "Email is not a registered active staff member" });
+      }
+      // Basic per-email rate limit (5 sends / 5 minutes) so this endpoint
+      // can't be hammered to burn through Gmail's daily send quota.
+      var cache = CacheService.getScriptCache();
+      var rlKey = "otp_rl_" + email;
+      var count = parseInt(cache.get(rlKey) || "0", 10);
+      if (count >= 5) {
+        return jsonResponse({ status: "error", error: "Too many OTP requests — try again shortly" });
+      }
+      cache.put(rlKey, String(count + 1), 300); // 5 minutes
 
       try {
         MailApp.sendEmail({
@@ -136,7 +214,7 @@ function doGet(e) {
     }
 
     // ── 3. Read all rows from a sheet ─────────────────────────────────
-    if (action === "read" || action === "write" || action === "append" || action === "delete") {
+    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete") {
       // Guard: spreadsheet ID must be configured
       if (!isConfigured) {
         return jsonResponse({
@@ -243,6 +321,74 @@ function doGet(e) {
       }
     }
 
+    // ── 5. Upsert a single row by ID (update in place, or append if new) ──
+    // This is what individual add/edit actions in the app use instead of
+    // rewriting a whole sheet — see the big comment on "write" above for
+    // why whole-sheet rewrites on every single edit caused lost updates.
+    if (action === "upsert") {
+      if (!sheetName) return jsonResponse({ status: "error", error: "Missing 'sheet' param" });
+      if (!isAllowed(sheetName)) return jsonResponse({ status: "error", error: "Sheet not allowed: " + sheetName });
+      if (!payload) return jsonResponse({ status: "error", error: "Missing 'payload' param" });
+
+      var upsertRow;
+      try {
+        var decodedU = Utilities.newBlob(Utilities.base64Decode(payload)).getDataAsString();
+        upsertRow = JSON.parse(decodedU);
+      } catch (parseErrU) {
+        return jsonResponse({ status: "error", error: "Invalid payload (base64/JSON): " + parseErrU.toString() });
+      }
+      if (!upsertRow || typeof upsertRow !== "object" || Array.isArray(upsertRow)) {
+        return jsonResponse({ status: "error", error: "Payload must be a single row object" });
+      }
+      var rowId = String(upsertRow.id || "");
+      if (!rowId) return jsonResponse({ status: "error", error: "Row must have an 'id' field" });
+
+      var ssU    = SpreadsheetApp.openById(SPREADSHEET_ID);
+      var sheetU = ssU.getSheetByName(sheetName);
+      if (!sheetU) sheetU = ssU.insertSheet(sheetName);
+
+      var lastRowU = sheetU.getLastRow();
+      var lastColU = sheetU.getLastColumn();
+      var headersU = lastRowU > 0 && lastColU > 0
+        ? sheetU.getRange(1, 1, 1, lastColU).getValues()[0]
+        : [];
+
+      // Extend headers with any new fields this row introduces (schema evolution —
+      // e.g. a field added to the app after the sheet already had data in it).
+      var newKeys = Object.keys(upsertRow).filter(function(k) { return headersU.indexOf(k) === -1; });
+      if (newKeys.length > 0) {
+        headersU = headersU.concat(newKeys);
+        var hrU = sheetU.getRange(1, 1, 1, headersU.length);
+        hrU.setValues([headersU]);
+        hrU.setFontWeight("bold");
+        hrU.setBackground("#f1f5f9");
+      }
+
+      var rowValues = headersU.map(function(h) {
+        var v = upsertRow[h];
+        return (v === null || v === undefined) ? "" : v;
+      });
+
+      // Find existing row with this id (column 1, since every sheet's first
+      // header is always "id" per the app's schema).
+      var foundRow = -1;
+      if (lastRowU >= 2) {
+        var idColValues = sheetU.getRange(2, 1, lastRowU - 1, 1).getValues();
+        for (var ri = 0; ri < idColValues.length; ri++) {
+          if (String(idColValues[ri][0]) === rowId) { foundRow = ri + 2; break; }
+        }
+      }
+
+      if (foundRow > -1) {
+        sheetU.getRange(foundRow, 1, 1, headersU.length).setValues([rowValues]);
+        return jsonResponse({ status: "ok", action: "updated", row: foundRow });
+      } else {
+        var insertAt = Math.max(sheetU.getLastRow() + 1, 2);
+        sheetU.getRange(insertAt, 1, 1, headersU.length).setValues([rowValues]);
+        return jsonResponse({ status: "ok", action: "inserted", row: insertAt });
+      }
+    }
+
     // ── 5. Delete a row by ID ─────────────────────────────────────────
     if (action === "delete") {
       if (!sheetName) return jsonResponse({ status: "error", error: "Missing 'sheet' param" });
@@ -271,6 +417,10 @@ function doGet(e) {
 
   } catch (err) {
     return jsonResponse({ status: "error", error: "Server error: " + err.toString() });
+  } finally {
+    if (lock) {
+      try { lock.releaseLock(); } catch (releaseErr) { /* already released/expired — ignore */ }
+    }
   }
 }
 
@@ -280,6 +430,30 @@ function isAllowed(name) {
     if (ALLOWED_SHEETS[i] === name) return true;
   }
   return false;
+}
+
+// ── Helper: does this email belong to a currently Active staff row? ───────────
+function isActiveStaffEmail(emailLower) {
+  try {
+    var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName("Finance_Staff");
+    if (!sheet || sheet.getLastRow() < 2) return false;
+
+    var data    = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+    var headers = data[0];
+    var emailCol  = headers.indexOf("email");
+    var statusCol = headers.indexOf("status");
+    if (emailCol === -1) return false;
+
+    for (var r = 1; r < data.length; r++) {
+      var rowEmail  = String(data[r][emailCol] || "").trim().toLowerCase();
+      var rowStatus = statusCol === -1 ? "Active" : String(data[r][statusCol] || "Active");
+      if (rowEmail === emailLower && rowStatus === "Active") return true;
+    }
+    return false;
+  } catch (err) {
+    return false;
+  }
 }
 
 // ── Helper: Build OTP email HTML ──────────────────────────────────────────────

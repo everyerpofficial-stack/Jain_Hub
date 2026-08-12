@@ -83,40 +83,23 @@ export function LoginPage() {
     const cleanPass = password.trim();
 
     if (cleanPass) {
-      // Password-based login: check local staff first for INSTANT SIGN-IN
-      let matched = staffList.find(
-        (s) =>
-          s.email.toLowerCase() === cleanEmail &&
-          s.status === "Active" &&
-          (s.password ? s.password === cleanPass : true)
-      );
+      // Password-based login: loginWithPassword() checks the local staff
+      // cache first for instant sign-in (it's also where hashed-password
+      // verification lives — kept in one place so this UI can't drift out
+      // of sync with how a match is actually determined).
+      let success = await loginWithPassword(cleanEmail, cleanPass);
 
-      // If not matched locally, try fetching sheets as fallback
-      if (!matched && sheetsUrl) {
+      // If not matched locally, refresh from sheets once and retry — covers
+      // a device that hasn't synced the staff directory yet.
+      if (!success && sheetsUrl) {
         try {
           await useStore.getState().loadFromSheets();
-          staffList = useStore.getState().staff;
-          matched = staffList.find(
-            (s) =>
-              s.email.toLowerCase() === cleanEmail &&
-              s.status === "Active" &&
-              (s.password ? s.password === cleanPass : true)
-          );
+          success = await loginWithPassword(cleanEmail, cleanPass);
         } catch (err) {
           console.warn("Failed to refresh staff from sheets on login attempt:", err);
         }
       }
 
-      if (!matched) {
-        recordLoginFailure(cleanEmail);
-        toast.error("Invalid password or email address");
-        setLoading(false);
-        return;
-      }
-
-      // Password correct — log in directly & INSTANTLY
-      clearLoginFailures(cleanEmail);
-      const success = loginWithPassword(cleanEmail, cleanPass);
       if (success) {
         toast.success("Signed in successfully", {
           description: "Welcome to the Jain Finance & Mobiles Hub",
@@ -127,9 +110,7 @@ export function LoginPage() {
         }
       } else {
         recordLoginFailure(cleanEmail);
-        toast.error("Access Denied", {
-          description: "This email is not registered as an active staff member.",
-        });
+        toast.error("Invalid password or email address");
       }
       setLoading(false);
       return;

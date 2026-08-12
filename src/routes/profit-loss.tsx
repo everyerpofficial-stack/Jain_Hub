@@ -106,7 +106,7 @@ function ProfitLossPage() {
   }, {});
 
   const today = new Date();
-  const referenceYear = startDate ? startDate.getFullYear() : (today.getFullYear() < 2026 ? 2026 : today.getFullYear());
+  const referenceYear = startDate ? startDate.getFullYear() : today.getFullYear();
 
   // ---- Per-month breakdown (Jan to Dec of referenceYear) ----
   const monthlyData = (() => {

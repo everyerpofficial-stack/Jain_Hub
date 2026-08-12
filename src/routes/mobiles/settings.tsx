@@ -23,6 +23,8 @@ function SettingsPage() {
   const updateSettings = useMobileStore((s) => s.updateSettings);
   const resetMobiles   = useMobileStore((s) => s.resetAll);
   const resetSeed      = useStore((s) => s.resetSeed);
+  const currentUser    = useStore((s) => s.currentUser);
+  const isAdmin        = currentUser?.role?.toLowerCase() === "admin";
 
   // Store profile fields
   const [storeName,     setStoreName]     = useState(settings.storeName);
@@ -326,7 +328,8 @@ function SettingsPage() {
               </button>
             </div>
 
-            {/* URL Input */}
+            {/* URL Input — Admin only: this URL is shared by every device in both modules */}
+            {isAdmin ? (
             <label className="block">
               <span className="text-xs font-semibold text-muted-foreground">Apps Script Web App URL (shared for both Finance & Mobiles)</span>
               <div className="mt-1.5 flex gap-2">
@@ -356,8 +359,15 @@ function SettingsPage() {
                 See <code className="bg-muted px-1 py-0.5 rounded text-[10px]">GOOGLE_SHEETS_SETUP.md</code> for step-by-step setup.
               </p>
             </label>
+            ) : (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30 border border-border text-xs text-muted-foreground">
+                <span>🔒</span>
+                <span>Only administrators can configure the sync URL. Current URL: <code className="font-mono">{sheetsConfig.url ? sheetsConfig.url.slice(0, 40) + "…" : "(not set)"}</code></span>
+              </div>
+            )}
 
-            {/* Action Buttons */}
+            {/* Action Buttons — admin only */}
+            {isAdmin && (
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleTestConnection}
@@ -398,6 +408,7 @@ function SettingsPage() {
                 {loading ? "Loading…" : "Load from Sheets"}
               </button>
             </div>
+            )}
 
             {/* Troubleshooting callout when test fails */}
             {testResult === "error" && (
@@ -466,7 +477,8 @@ function SettingsPage() {
           </div>
         </Card>
 
-        {/* ── Danger Zone ─────────────────────────────────────────────────── */}
+        {/* ── Danger Zone — Admin Only ─────────────────────────────────────── */}
+        {isAdmin ? (
         <Card className="p-5 border-danger/30 bg-danger/5">
           <SectionHeader title="Danger Zone — Clear Database" action={<Trash2 className="size-3.5 text-danger" />} />
           <p className="text-xs text-muted-foreground mb-5 mt-1">
@@ -496,6 +508,12 @@ function SettingsPage() {
             </button>
           </div>
         </Card>
+        ) : (
+          <div className="flex items-center gap-3 p-4 rounded-xl border border-danger/20 bg-danger/5 text-xs text-muted-foreground">
+            <span className="text-danger text-base">🔒</span>
+            <span>The Danger Zone (clear database) is restricted to Administrators only.</span>
+          </div>
+        )}
       </div>
     </AppShell>
   );

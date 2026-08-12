@@ -114,10 +114,13 @@ function SalesPage() {
 
   // Check if customer is blacklisted
   const cleanedTypedMobile = cMobile.trim().replace(/[^\d]/g, "");
-  const existingCustomer = customers.find(
-    (c) => String(c?.mobile ?? "").replace(/[^\d]/g, "") === cleanedTypedMobile
+  // Check every customer record sharing this mobile number, not just the
+  // first match — if a duplicate profile exists and only one copy is
+  // flagged blacklisted, .find() could return the non-flagged copy and
+  // silently let a blacklisted customer check out.
+  const isBlacklisted = customers.some(
+    (c) => String(c?.mobile ?? "").replace(/[^\d]/g, "") === cleanedTypedMobile && c?.isBlacklisted
   );
-  const isBlacklisted = existingCustomer?.isBlacklisted ?? false;
 
   const isMobileValid = /^\d{10}$/.test(cMobile.trim());
   const canCheckout = cName.trim() && isMobileValid && productId && !isBlacklisted && manualPrice;

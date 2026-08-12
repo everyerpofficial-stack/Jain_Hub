@@ -78,7 +78,7 @@ function ExpensesPage() {
   ).sort((a, b) => b[1] - a[1]);
 
   const today = new Date();
-  const referenceYear = startDate ? startDate.getFullYear() : (today.getFullYear() < 2026 ? 2026 : today.getFullYear());
+  const referenceYear = startDate ? startDate.getFullYear() : today.getFullYear();
 
   // Dynamic monthly income/expense comparison for referenceYear
   const monthlyData = (() => {

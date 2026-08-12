@@ -9,6 +9,16 @@ import { useMobileStore, MobilePurchase, MobileSupplier, MobileProduct, safeItem
 import { parseAppDate, isDateInRange } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
+/** Escape HTML special chars to prevent XSS when inserting user data into innerHTML */
+function escapeHtml(str: string | number | undefined | null): string {
+  if (str === undefined || str === null) return "—";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 export const Route = createFileRoute("/mobiles/purchases")({
   head: () => ({
@@ -84,9 +94,9 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
     // Check if item already exists in draft list
     const existingIndex = items.findIndex((item) => item.productId === productId);
     if (existingIndex > -1) {
-      const updated = [...items];
-      updated[existingIndex].quantity += qtyNum;
-      updated[existingIndex].cost = costNum;
+      const updated = items.map((item, i) =>
+        i === existingIndex ? { ...item, quantity: item.quantity + qtyNum, cost: costNum } : item
+      );
       setItems(updated);
     } else {
       setItems([...items, {
@@ -792,7 +802,7 @@ function PurchasesPage() {
         (item) => `
       <tr style="border-bottom: 1px solid #f1f5f9;">
         <td style="padding: 12px; color: #334155;">
-          <strong>${item.productName}</strong>
+          <strong>${escapeHtml(item.productName)}</strong>
         </td>
         <td style="padding: 12px; text-align: center; color: #334155;">${item.quantity}</td>
         <td style="padding: 12px; text-align: right; font-weight: 500; color: #0f172a;">₹${item.cost.toLocaleString("en-IN")}</td>
@@ -806,29 +816,29 @@ function PurchasesPage() {
       <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 40px; max-width: 800px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: white; color: #1e293b; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);">
         <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #f1f5f9; padding-bottom: 24px; margin-bottom: 24px;">
           <div>
-            <h1 style="margin: 0; font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.025em; text-transform: uppercase;">${supplier ? supplier.name : purchase.supplierName}</h1>
+            <h1 style="margin: 0; font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.025em; text-transform: uppercase;">${escapeHtml(supplier ? supplier.name : purchase.supplierName)}</h1>
             <p style="margin: 6px 0 0 0; font-size: 13px; color: #64748b; font-weight: 500;">Purchase Invoice (Inward)</p>
-            ${supplier && supplier.address ? `<p style="margin: 2px 0 0 0; font-size: 12px; color: #94a3b8;">${supplier.address}</p>` : ""}
-            ${supplier && supplier.contact ? `<p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8; font-family: monospace;">Contact: ${supplier.contact}</p>` : ""}
+            ${supplier && supplier.address ? `<p style="margin: 2px 0 0 0; font-size: 12px; color: #94a3b8;">${escapeHtml(supplier.address)}</p>` : ""}
+            ${supplier && supplier.contact ? `<p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8; font-family: monospace;">Contact: ${escapeHtml(supplier.contact)}</p>` : ""}
           </div>
           <div style="text-align: right;">
             <h2 style="margin: 0; font-size: 15px; font-weight: 700; color: #16a34a; text-transform: uppercase;">Inward Bill</h2>
-            <p style="margin: 6px 0 0 0; font-size: 13px; font-weight: 600; color: #0f172a;">Bill ID: <strong>${purchase.id}</strong></p>
-            <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Invoice No: <strong>${purchase.invoiceNo}</strong></p>
-            <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Date: ${purchase.date}</p>
+            <p style="margin: 6px 0 0 0; font-size: 13px; font-weight: 600; color: #0f172a;">Bill ID: <strong>${escapeHtml(purchase.id)}</strong></p>
+            <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Invoice No: <strong>${escapeHtml(purchase.invoiceNo)}</strong></p>
+            <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Date: ${escapeHtml(purchase.date)}</p>
           </div>
         </div>
 
         <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 30px; font-size: 13px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
           <div>
             <h3 style="margin: 0 0 8px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.05em;">Billed To (Store Details)</h3>
-            <p style="margin: 3px 0;"><strong>Name:</strong> ${settings.storeName}</p>
-            <p style="margin: 3px 0;"><strong>Address:</strong> ${settings.address}</p>
-            <p style="margin: 3px 0;"><strong>Contact:</strong> ${settings.contact}</p>
+            <p style="margin: 3px 0;"><strong>Name:</strong> ${escapeHtml(settings.storeName)}</p>
+            <p style="margin: 3px 0;"><strong>Address:</strong> ${escapeHtml(settings.address)}</p>
+            <p style="margin: 3px 0;"><strong>Contact:</strong> ${escapeHtml(settings.contact)}</p>
           </div>
           <div style="border-left: 1px solid #e2e8f0; padding-left: 16px;">
             <h3 style="margin: 0 0 8px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.05em;">Payment Details</h3>
-            <p style="margin: 3px 0;"><strong>Status:</strong> ${purchase.status}</p>
+            <p style="margin: 3px 0;"><strong>Status:</strong> ${escapeHtml(purchase.status)}</p>
             <p style="margin: 3px 0;"><strong>Total Purchase Amount:</strong> ₹${purchase.amount.toLocaleString("en-IN")}</p>
           </div>
         </div>

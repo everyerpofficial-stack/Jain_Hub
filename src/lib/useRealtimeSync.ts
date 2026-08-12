@@ -186,6 +186,8 @@ async function reconcileFinance(url: string, sheets: string[]) {
           ...r,
           customerId: String(r.customerId || ""),
           status: (r.status || "Success") as "Success" | "Refunded",
+          cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
+          bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
         }));
         const current = useStore.getState().payments;
         const currentJSON = JSON.stringify(current);
@@ -223,15 +225,18 @@ async function reconcileFinance(url: string, sheets: string[]) {
       }
 
       if (sheet === "Finance_Staff") {
-        if (rows.length > 0) {
-          const newStaffList = rows.map((r) => ({
+        const validRows = rows.filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()));
+        if (validRows.length > 0) {
+          const newStaffList = validRows.map((r) => ({
             id: String(r.id || ""),
             name: String(r.name || ""),
             email: String(r.email || ""),
             role: String(r.role || "Staff"),
             status: (r.status || "Active") as "Active" | "Inactive",
             access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
-            password: String(r.password || ""),
+            password: r.password ? String(r.password) : undefined,
+            passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
+            passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
           }));
 
           const normalizedCurrent = useStore.getState().staff.map((s) => ({
@@ -241,7 +246,9 @@ async function reconcileFinance(url: string, sheets: string[]) {
             role: String(s.role || "Staff"),
             status: (s.status || "Active") as "Active" | "Inactive",
             access: (s.access || "Both") as "Finance" | "Mobiles" | "Both",
-            password: String(s.password || ""),
+            password: s.password ? String(s.password) : undefined,
+            passwordHash: s.passwordHash ? String(s.passwordHash) : undefined,
+            passwordSalt: s.passwordSalt ? String(s.passwordSalt) : undefined,
           }));
 
           const isDifferent = JSON.stringify(normalizedCurrent) !== JSON.stringify(newStaffList);

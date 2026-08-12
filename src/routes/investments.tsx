@@ -86,7 +86,7 @@ function InvestmentsPage() {
     : "0";
 
   const today = new Date();
-  const referenceYear = startDate ? startDate.getFullYear() : (today.getFullYear() < 2026 ? 2026 : today.getFullYear());
+  const referenceYear = startDate ? startDate.getFullYear() : today.getFullYear();
 
   // Dynamic customer finance growth trend
   const growth = (() => {

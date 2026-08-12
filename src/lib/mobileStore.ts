@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { formatDateToInr } from "./store";
-import { type SheetsConfig, writeSheet, readSheet, nowTimestamp } from "./googleSheets";
+import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
+import { nextSeqId } from "./utils";
 
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   "TV": [
@@ -350,6 +351,110 @@ const defaultSettings: MobileSettings = {
   invoicePrefix: "JM-INV-"
 };
 
+// ── Sheet row shape builders ──────────────────────────────────────────────────
+// Single source of truth for how each entity maps to its sheet's columns —
+// used both by the full-table syncToSheets() below and by the per-record
+// upsert/delete calls each mutator makes, so the two paths can't drift.
+function saleRow(s: MobileSale): SheetRow {
+  return {
+    id: s.id,
+    customerName: s.customerName,
+    customerMobile: s.customerMobile,
+    fatherName: s.fatherName || "",
+    village: s.village || "",
+    date: s.date,
+    dueDate: s.dueDate || "",
+    subtotal: s.subtotal,
+    gst: s.gst,
+    totalAmount: s.totalAmount,
+    paymentMethod: s.paymentMethod,
+    paymentStatus: s.paymentStatus,
+    amountPaid: s.amountPaid,
+    dueAmount: s.dueAmount,
+    cashAmountPaid: s.cashAmountPaid ?? "",
+    upiAmountPaid: s.upiAmountPaid ?? "",
+    items: JSON.stringify(s.items || []),
+  };
+}
+function purchaseRow(p: MobilePurchase): SheetRow {
+  return {
+    id: p.id, supplierName: p.supplierName, invoiceNo: p.invoiceNo,
+    date: p.date, quantity: p.quantity, amount: p.amount, status: p.status,
+    gst: p.gst,
+    paymentMode: p.paymentMode || "",
+    paymentRemark: p.paymentRemark || "",
+    items: JSON.stringify(p.items || []),
+  };
+}
+function mobileExpenseRow(e: MobileExpense): SheetRow {
+  return {
+    id: e.id, date: e.date, cat: e.cat, desc: e.desc,
+    amount: e.amount, type: e.type ?? "Expense", paymentMode: e.paymentMode ?? "Cash",
+  };
+}
+function supplierRow(s: MobileSupplier): SheetRow {
+  return {
+    id: s.id, name: s.name, gstNo: s.gstNo ?? "", contact: s.contact,
+    address: s.address, outstanding: s.outstanding,
+  };
+}
+function supplierPaymentRow(p: SupplierPayment): SheetRow {
+  return {
+    id: p.id, supplierName: p.supplierName, amount: p.amount,
+    date: p.date, remark: p.remark ?? "",
+    paymentMode: p.paymentMode ?? "Cash",
+  };
+}
+function mobileCustomerRow(c: MobileCustomer): SheetRow {
+  return {
+    id: c.id, name: c.name, mobile: c.mobile, email: c.email,
+    address: c.address, registeredDate: c.registeredDate,
+    fatherName: c.fatherName || "",
+    village: c.village || "",
+    isBlacklisted: c.isBlacklisted ? "true" : "false",
+  };
+}
+function productRow(p: MobileProduct): SheetRow {
+  return {
+    id: p.id, name: p.name, brand: p.brand, model: p.model,
+    color: p.color, ramRom: p.ramRom, category: p.category,
+    purchasePrice: p.purchasePrice, sellingPrice: p.sellingPrice ?? 0, status: p.status,
+  };
+}
+function accessoryRow(a: MobileAccessory): SheetRow {
+  return {
+    id: a.id, name: a.name, category: a.category,
+    stock: a.stock, minLimit: a.minLimit,
+    purchasePrice: a.purchasePrice, sellingPrice: a.sellingPrice,
+    status: a.status,
+  };
+}
+function warrantyRow(w: MobileWarrantyClaim): SheetRow {
+  return {
+    id: w.id, customerName: w.customerName, mobile: w.customerMobile || "",
+    productName: w.productName, imei: w.imei, claimDate: w.claimDate,
+    issueDescription: w.issue || "", status: w.status,
+  };
+}
+
+// ── Per-record sync helpers ─────────────────────────────────────────────────
+// Mutators call these instead of the full syncToSheets(), so a single add/
+// edit/delete only ever touches its own row(s) on the shared sheet — see
+// the matching comment in store.ts for why a full-table rewrite on every
+// mutation caused lost updates between devices.
+function syncUpsert(get: () => MobilesState, sheet: SheetName, row: SheetRow, label: string) {
+  const { sheetsConfig } = get();
+  if (sheetsConfig.enabled && sheetsConfig.url) {
+    upsertRow(sheetsConfig.url, sheet, row).catch((err) => console.warn(`[MobileStore] Immediate ${label} sync failed:`, err));
+  }
+}
+function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label: string) {
+  const { sheetsConfig } = get();
+  if (sheetsConfig.enabled && sheetsConfig.url) {
+    deleteRow(sheetsConfig.url, sheet, id).catch((err) => console.warn(`[MobileStore] Immediate ${label} sync failed:`, err));
+  }
+}
+
 // ── PERMANENT GOOGLE SHEETS DATABASE URL ─────────────────────────────────────
 const PERMANENT_SHEETS_URL =
   (import.meta.env.VITE_GOOGLE_SHEETS_URL as string) ||
@@ -387,11 +492,11 @@ export const useMobileStore = create<MobilesState>()(
       },
 
       addProduct: (p) => {
-        const id = "MP-" + (get().products.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("MP-", get().products.map((x) => x.id));
         const newProduct: MobileProduct = { ...p, id, status: "In Stock" };
-        
+
         // Also insert into Inventory
-        const invId = "INV-" + (get().inventory.length + 1).toString().padStart(3, "0");
+        const invId = nextSeqId("INV-", get().inventory.map((x) => x.id));
         const newInvItem: MobileInventoryItem = {
           id: invId,
           productId: id,
@@ -409,7 +514,8 @@ export const useMobileStore = create<MobilesState>()(
           products: [...state.products, newProduct],
           inventory: [...state.inventory, newInvItem]
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate product add sync failed:", err));
+        // Inventory has no sheet of its own — only the product row syncs.
+        syncUpsert(get, "Mobiles_Products", productRow(newProduct), "product add");
       },
 
       updateProduct: (id, updatedFields) => {
@@ -434,7 +540,8 @@ export const useMobileStore = create<MobilesState>()(
           });
           return { products, inventory };
         });
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate product update sync failed:", err));
+        const updatedProduct = get().products.find((p) => p.id === id);
+        if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product update");
       },
 
       deleteProduct: (id) => {
@@ -442,7 +549,7 @@ export const useMobileStore = create<MobilesState>()(
           products: state.products.filter((p) => p.id !== id),
           inventory: state.inventory.filter((inv) => inv.productId !== id)
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate product delete sync failed:", err));
+        syncDelete(get, "Mobiles_Products", id, "product delete");
       },
 
       adjustStock: (productId, qtyChange) => {
@@ -483,29 +590,30 @@ export const useMobileStore = create<MobilesState>()(
       },
 
       addSupplier: (s) => {
-        const id = "MS-" + (get().suppliers.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("MS-", get().suppliers.map((x) => x.id));
         const newSupplier: MobileSupplier = { ...s, id, outstanding: 0 };
         set((state) => ({ suppliers: [...state.suppliers, newSupplier] }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier add sync failed:", err));
+        syncUpsert(get, "Mobiles_Suppliers", supplierRow(newSupplier), "supplier add");
       },
 
       updateSupplier: (id, updatedFields) => {
         set((state) => ({
           suppliers: state.suppliers.map((s) => (s.id === id ? { ...s, ...updatedFields } : s))
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier update sync failed:", err));
+        const updatedSupplier = get().suppliers.find((s) => s.id === id);
+        if (updatedSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier update");
       },
 
       deleteSupplier: (id) => {
         set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id) }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier delete sync failed:", err));
+        syncDelete(get, "Mobiles_Suppliers", id, "supplier delete");
       },
 
       paySupplier: (id, amount, date, remark, paymentMode = "Cash", cashAmount, bankAmount) => {
         const supplier = get().suppliers.find((s) => s.id === id || s.name.trim().toLowerCase() === id.trim().toLowerCase());
         if (!supplier) return;
         const newPayment: SupplierPayment = {
-          id: "SPM-" + ((get().supplierPayments ? get().supplierPayments.length : 0) + 1).toString().padStart(3, "0"),
+          id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
           supplierId: supplier.id,
           supplierName: supplier.name,
           amount,
@@ -521,11 +629,13 @@ export const useMobileStore = create<MobilesState>()(
           ),
           supplierPayments: [newPayment, ...(state.supplierPayments || [])]
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate supplier payment sync failed:", err));
+        syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment");
+        const updatedSupplier = get().suppliers.find((s) => s.id === supplier.id);
+        if (updatedSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier balance (from payment)");
       },
 
       recordPurchase: (pur) => {
-        const id = "MPR-" + (get().purchases.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("MPR-", get().purchases.map((x) => x.id));
         const subtotal = pur.items.reduce((sum, item) => sum + item.quantity * item.cost, 0);
         const total = subtotal;
         const status = pur.payNow ? "Paid" : "Outstanding";
@@ -535,7 +645,7 @@ export const useMobileStore = create<MobilesState>()(
         );
 
         if (!supplier && pur.supplierName) {
-          const supId = "MS-" + (get().suppliers.length + 1).toString().padStart(3, "0");
+          const supId = nextSeqId("MS-", get().suppliers.map((x) => x.id));
           supplier = { id: supId, name: pur.supplierName, contact: "—", address: "—", outstanding: 0 };
           set((state) => ({ suppliers: [...state.suppliers, supplier!] }));
         }
@@ -574,7 +684,7 @@ export const useMobileStore = create<MobilesState>()(
           const cAmt = pur.cashAmount !== undefined ? pur.cashAmount : pMode === "Cash" ? total : pMode === "Cash & UPI" ? total / 2 : 0;
           const bAmt = pur.bankAmount !== undefined ? pur.bankAmount : pMode === "UPI" || pMode === "Bank" ? total : pMode === "Cash & UPI" ? total / 2 : 0;
           const newPayment: SupplierPayment = {
-            id: "SPM-" + ((get().supplierPayments ? get().supplierPayments.length : 0) + 1).toString().padStart(3, "0"),
+            id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
             supplierId: supplier.id,
             supplierName: supplier.name,
             amount: total,
@@ -593,12 +703,29 @@ export const useMobileStore = create<MobilesState>()(
           purchases: [newPurchase, ...state.purchases]
         }));
 
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate purchase sync failed:", err));
+        syncUpsert(get, "Mobiles_Purchases", purchaseRow(newPurchase), "purchase");
+        // adjustStock() above can flip a product's status (e.g. Out of Stock
+        // -> In Stock) — sync each affected product row so that change isn't
+        // silently lost now that this action no longer does a full-table sync.
+        pur.items.forEach((item) => {
+          const updatedProduct = get().products.find((p) => p.id === item.productId);
+          if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product (from purchase)");
+        });
+        if (supplier) {
+          // Covers both an auto-created supplier and an outstanding-balance
+          // update — by now the store holds the final state for either case.
+          const finalSupplier = get().suppliers.find((s) => s.id === supplier!.id);
+          if (finalSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(finalSupplier), "supplier (from purchase)");
+          if (pur.payNow) {
+            const latestPayment = get().supplierPayments?.[0];
+            if (latestPayment) syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(latestPayment), "supplier payment (from purchase)");
+          }
+        }
         return newPurchase;
       },
 
       createBill: (saleInput) => {
-        const id = "MSL-" + (get().sales.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("MSL-", get().sales.map((x) => x.id));
         const date = saleInput.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
         
         const subtotal = saleInput.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -650,7 +777,15 @@ export const useMobileStore = create<MobilesState>()(
           sales: [newSale, ...state.sales]
         }));
 
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate sale sync failed:", err));
+        // addCustomer() above already syncs itself when it creates a new customer.
+        syncUpsert(get, "Mobiles_Sales", saleRow(newSale), "sale");
+        // adjustStock() above can flip a product's status (e.g. In Stock ->
+        // Out of Stock) — sync each affected product row, same rationale as
+        // the equivalent loop in recordPurchase.
+        saleInput.items.forEach((item) => {
+          const updatedProduct = get().products.find((p) => p.id === item.productId);
+          if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product (from sale)");
+        });
         return newSale;
       },
 
@@ -685,15 +820,16 @@ export const useMobileStore = create<MobilesState>()(
           action: "COLLECT_SALE_DUE",
           target: `Collected ₹${amount} (${paymentMethod}) for Bill ${saleId} from ${sale.customerName}. Remaining Due: ₹${newDueAmount}`,
         });
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate sale payment sync failed:", err));
+        const updatedSale = get().sales.find((s) => s.id === saleId);
+        if (updatedSale) syncUpsert(get, "Mobiles_Sales", saleRow(updatedSale), "sale payment");
       },
 
       addCustomer: (c) => {
-        const id = "MC-" + (get().customers.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("MC-", get().customers.map((x) => x.id));
         const registeredDate = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
         const newCustomer: MobileCustomer = { ...c, id, registeredDate };
         set((state) => ({ customers: [...state.customers, newCustomer] }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate customer add sync failed:", err));
+        syncUpsert(get, "Mobiles_Customers", mobileCustomerRow(newCustomer), "customer add");
         return newCustomer;
       },
 
@@ -701,12 +837,13 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           customers: state.customers.map((c) => (c.id === id ? { ...c, ...updatedFields } : c))
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate customer update sync failed:", err));
+        const updatedCustomer = get().customers.find((c) => c.id === id);
+        if (updatedCustomer) syncUpsert(get, "Mobiles_Customers", mobileCustomerRow(updatedCustomer), "customer update");
       },
 
       deleteCustomer: (id) => {
         set((state) => ({ customers: state.customers.filter((c) => c.id !== id) }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate customer delete sync failed:", err));
+        syncDelete(get, "Mobiles_Customers", id, "customer delete");
       },
 
       addImei: (imei) => {
@@ -722,10 +859,10 @@ export const useMobileStore = create<MobilesState>()(
       },
 
       addAccessory: (a) => {
-        const id = "MA-" + (get().accessories.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("MA-", get().accessories.map((x) => x.id));
         const newAccessory: MobileAccessory = { ...a, id, status: getQtyStatus(a.stock, a.minLimit) };
         set((state) => ({ accessories: [...state.accessories, newAccessory] }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory sync failed:", err));
+        syncUpsert(get, "Mobiles_Accessories", accessoryRow(newAccessory), "accessory add");
       },
 
       updateAccessory: (id, updatedFields) => {
@@ -743,12 +880,13 @@ export const useMobileStore = create<MobilesState>()(
             return a;
           })
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory update sync failed:", err));
+        const updatedAccessory = get().accessories.find((a) => a.id === id);
+        if (updatedAccessory) syncUpsert(get, "Mobiles_Accessories", accessoryRow(updatedAccessory), "accessory update");
       },
 
       deleteAccessory: (id) => {
         set((state) => ({ accessories: state.accessories.filter((a) => a.id !== id) }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory delete sync failed:", err));
+        syncDelete(get, "Mobiles_Accessories", id, "accessory delete");
       },
 
       sellAccessory: (id, qty) => {
@@ -761,22 +899,24 @@ export const useMobileStore = create<MobilesState>()(
             return a;
           })
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate accessory sell sync failed:", err));
+        const soldAccessory = get().accessories.find((a) => a.id === id);
+        if (soldAccessory) syncUpsert(get, "Mobiles_Accessories", accessoryRow(soldAccessory), "accessory sell");
       },
 
       addWarrantyClaim: (w) => {
-        const id = "WC-" + (get().warranties.length + 1).toString().padStart(3, "0");
+        const id = nextSeqId("WC-", get().warranties.map((x) => x.id));
         const claimDate = new Date().toISOString().split("T")[0];
         const newClaim: MobileWarrantyClaim = { ...w, id, claimDate, status: "Pending" };
         set((state) => ({ warranties: [...state.warranties, newClaim] }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate warranty sync failed:", err));
+        syncUpsert(get, "Mobiles_WarrantyClaims", warrantyRow(newClaim), "warranty add");
       },
 
       updateWarrantyStatus: (id, status) => {
         set((state) => ({
           warranties: state.warranties.map((w) => (w.id === id ? { ...w, status } : w))
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate warranty status sync failed:", err));
+        const updatedClaim = get().warranties.find((w) => w.id === id);
+        if (updatedClaim) syncUpsert(get, "Mobiles_WarrantyClaims", warrantyRow(updatedClaim), "warranty status update");
       },
 
       updateSettings: (updatedSettings) => {
@@ -805,7 +945,7 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           expenses: [newExpense, ...state.expenses]
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate expense sync failed:", err));
+        syncUpsert(get, "Mobiles_Expenses", mobileExpenseRow(newExpense), "expense");
         return newExpense;
       },
 
@@ -813,7 +953,7 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           expenses: state.expenses.filter((e) => e.id !== id)
         }));
-        get().syncToSheets().catch((err) => console.warn("[MobileStore] Immediate expense delete sync failed:", err));
+        syncDelete(get, "Mobiles_Expenses", id, "expense delete");
       },
 
       resetAll: () => {
@@ -857,69 +997,15 @@ export const useMobileStore = create<MobilesState>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          await writeSheet(sheetsConfig.url, "Mobiles_Sales", sales.map((s) => ({
-            id: s.id,
-            customerName: s.customerName,
-            customerMobile: s.customerMobile,
-            fatherName: s.fatherName || "",
-            village: s.village || "",
-            date: s.date,
-            dueDate: s.dueDate || "",
-            subtotal: s.subtotal,
-            gst: s.gst,
-            totalAmount: s.totalAmount,
-            paymentMethod: s.paymentMethod,
-            paymentStatus: s.paymentStatus,
-            amountPaid: s.amountPaid,
-            dueAmount: s.dueAmount,
-            cashAmountPaid: s.cashAmountPaid ?? "",
-            upiAmountPaid: s.upiAmountPaid ?? "",
-            items: JSON.stringify(s.items || []),
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_Purchases", purchases.map((p) => ({
-            id: p.id, supplierName: p.supplierName, invoiceNo: p.invoiceNo,
-            date: p.date, quantity: p.quantity, amount: p.amount, status: p.status,
-            gst: p.gst,
-            paymentMode: p.paymentMode || "",
-            paymentRemark: p.paymentRemark || "",
-            items: JSON.stringify(p.items || []),
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_Expenses", expenses.map((e) => ({
-            id: e.id, date: e.date, cat: e.cat, desc: e.desc,
-            amount: e.amount, type: e.type ?? "Expense", paymentMode: e.paymentMode ?? "Cash",
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_Suppliers", suppliers.map((s) => ({
-            id: s.id, name: s.name, gstNo: s.gstNo ?? "", contact: s.contact,
-            address: s.address, outstanding: s.outstanding,
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", supplierPayments.map((p) => ({
-            id: p.id, supplierName: p.supplierName, amount: p.amount,
-            date: p.date, remark: p.remark ?? "",
-            paymentMode: p.paymentMode ?? "Cash",
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_Customers", customers.map((c) => ({
-            id: c.id, name: c.name, mobile: c.mobile, email: c.email,
-            address: c.address, registeredDate: c.registeredDate,
-            fatherName: c.fatherName || "",
-            village: c.village || "",
-            isBlacklisted: c.isBlacklisted ? "true" : "false",
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_Products", products.map((p) => ({
-            id: p.id, name: p.name, brand: p.brand, model: p.model,
-            color: p.color, ramRom: p.ramRom, category: p.category,
-            purchasePrice: p.purchasePrice, sellingPrice: p.sellingPrice ?? 0, status: p.status,
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_Accessories", accessories.map((a) => ({
-            id: a.id, name: a.name, category: a.category,
-            stock: a.stock, minLimit: a.minLimit,
-            purchasePrice: a.purchasePrice, sellingPrice: a.sellingPrice,
-            status: a.status,
-          })));
-          await writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", warranties.map((w) => ({
-            id: w.id, customerName: w.customerName, mobile: w.customerMobile || "",
-            productName: w.productName, imei: w.imei, claimDate: w.claimDate,
-            issueDescription: w.issue || "", status: w.status,
-          })));
+          await writeSheet(sheetsConfig.url, "Mobiles_Sales", sales.map(saleRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Purchases", purchases.map(purchaseRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Expenses", expenses.map(mobileExpenseRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Suppliers", suppliers.map(supplierRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", supplierPayments.map(supplierPaymentRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Customers", customers.map(mobileCustomerRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Products", products.map(productRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Accessories", accessories.map(accessoryRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", warranties.map(warrantyRow));
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -1027,43 +1113,12 @@ export const useMobileStore = create<MobilesState>()(
   )
 );
 
-// ── Auto-push to Sheets on every Mobiles data mutation ───────────────────────
-// Debounced 3s — fires silently in background after any add/edit/delete.
-let _mobilesAutoSyncTimer: ReturnType<typeof setTimeout> | null = null;
-let _lastMobSales = useMobileStore.getState().sales;
-let _lastMobPurchases = useMobileStore.getState().purchases;
-let _lastMobProducts = useMobileStore.getState().products;
-let _lastMobExpenses = useMobileStore.getState().expenses;
-let _lastMobSuppliers = useMobileStore.getState().suppliers;
-let _lastMobCustomers = useMobileStore.getState().customers;
-let _lastMobAccessories = useMobileStore.getState().accessories;
-let _lastMobWarranties = useMobileStore.getState().warranties;
-
-useMobileStore.subscribe((state) => {
-  if (!state.sheetsConfig.enabled || !state.sheetsConfig.url) return;
-
-  if (
-    state.sales !== _lastMobSales ||
-    state.purchases !== _lastMobPurchases ||
-    state.products !== _lastMobProducts ||
-    state.expenses !== _lastMobExpenses ||
-    state.suppliers !== _lastMobSuppliers ||
-    state.customers !== _lastMobCustomers ||
-    state.accessories !== _lastMobAccessories ||
-    state.warranties !== _lastMobWarranties
-  ) {
-    _lastMobSales = state.sales;
-    _lastMobPurchases = state.purchases;
-    _lastMobProducts = state.products;
-    _lastMobExpenses = state.expenses;
-    _lastMobSuppliers = state.suppliers;
-    _lastMobCustomers = state.customers;
-    _lastMobAccessories = state.accessories;
-    _lastMobWarranties = state.warranties;
-
-    if (_mobilesAutoSyncTimer) clearTimeout(_mobilesAutoSyncTimer);
-    _mobilesAutoSyncTimer = setTimeout(() => {
-      useMobileStore.getState().syncToSheets().catch(() => {/* silent */});
-    }, 3000);
-  }
-});
+// NOTE: there used to be a debounced subscriber here that did a full
+// syncToSheets() 3s after ANY change to sales/purchases/products/expenses/
+// suppliers/customers/accessories/warranties. That's been removed — every
+// mutator above now pushes its own targeted upsert/delete immediately (see
+// syncUpsert/syncDelete), which is what actually fixes the lost-update
+// race described in store.ts's matching comment. A delayed FULL rewrite on
+// top of that would just reintroduce the same race. syncToSheets() itself
+// is intentionally still used for the manual "Sync Now" button and initial
+// connect, where a full rewrite is exactly what's wanted.

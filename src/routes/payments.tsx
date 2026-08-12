@@ -60,7 +60,8 @@ function PaymentsPage() {
     .filter((p) => p.status === "Success")
     .reduce((sum, p) => sum + Number(p.amount.replace(/[^\d]/g, "")), 0);
 
-  const byMethod = ["Cash", "UPI"].map((m) => ({
+  const methodsPresent = Array.from(new Set(["Cash", "UPI", ...payments.map((p) => p.method)]));
+  const byMethod = methodsPresent.map((m) => ({
     method: m,
     count: filtered.filter((p) => p.method === m && p.status === "Success").length,
     amount: filtered.filter((p) => p.method === m && p.status === "Success")

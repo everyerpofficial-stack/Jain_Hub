@@ -260,10 +260,10 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
         <div className="size-8 rounded-full bg-foreground text-background grid place-items-center text-xs font-semibold">
           {currentUser?.name
             ? currentUser.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
-            : "RJ"}
+            : "AG"}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">{currentUser?.name || "Rajesh Jain"}</div>
+          <div className="text-sm font-medium truncate">{currentUser?.name || "Avinash G"}</div>
           <div className="text-[11px] text-muted-foreground truncate">{currentUser?.role || "Administrator"}</div>
         </div>
         <button

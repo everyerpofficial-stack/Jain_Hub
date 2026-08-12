@@ -103,43 +103,89 @@ export function CashFlowDashboard() {
     });
 
     // EMI Collections (Inflow)
+    // "Bank" behaves like "UPI" here (both are non-cash/bank-routed funds).
+    // "Cash & Bank" is a genuine split and must contribute to BOTH buckets —
+    // bucketing it entirely as Cash (as this used to do) overstated cash-in-hand
+    // and understated bank balance for every split payment.
     fPayments.forEach((p) => {
       if (p.status === "Success") {
         const amt = Number(p.amount.replace(/[^\d]/g, ""));
         if (amt > 0) {
           const dObj = parseAppDate(p.date);
-          items.push({
-            id: `F-EMI-${p.id}`,
-            date: p.date,
-            dateObj: dObj,
-            module: "Finance",
-            type: "Inflow",
-            category: "EMI Collection",
-            description: `EMI Payment collection - ${p.customer}`,
-            amount: amt,
-            method: p.method === "UPI" ? "UPI" : "Cash",
-          });
+          if (p.method === "Cash & Bank") {
+            const cashPart = p.cashAmount ?? Math.floor(amt / 2);
+            const bankPart = p.bankAmount ?? (amt - cashPart);
+            if (cashPart > 0) {
+              items.push({
+                id: `F-EMI-${p.id}-CASH`, date: p.date, dateObj: dObj, module: "Finance", type: "Inflow",
+                category: "EMI Collection", description: `EMI Payment collection (Cash portion) - ${p.customer}`,
+                amount: cashPart, method: "Cash",
+              });
+            }
+            if (bankPart > 0) {
+              items.push({
+                id: `F-EMI-${p.id}-BANK`, date: p.date, dateObj: dObj, module: "Finance", type: "Inflow",
+                category: "EMI Collection", description: `EMI Payment collection (Bank portion) - ${p.customer}`,
+                amount: bankPart, method: "UPI",
+              });
+            }
+          } else {
+            items.push({
+              id: `F-EMI-${p.id}`,
+              date: p.date,
+              dateObj: dObj,
+              module: "Finance",
+              type: "Inflow",
+              category: "EMI Collection",
+              description: `EMI Payment collection - ${p.customer}`,
+              amount: amt,
+              method: p.method === "Cash" ? "Cash" : "UPI",
+            });
+          }
         }
       }
     });
 
     // Income & Expenses (Inflow / Outflow)
+    // "Bank" behaves like "UPI" (non-cash). Expenses don't capture a
+    // cash/bank split the way EMI Payments do, so an unsplit "Cash & Bank"
+    // entry is divided evenly between both buckets — the same 50/50
+    // fallback the Mobiles module already uses for its own unsplit
+    // "Cash & UPI" sales (see mobiles/sales.tsx) — rather than dumping the
+    // full amount into one bucket, which would misstate cash-in-hand.
     fExpenses.forEach((e) => {
       const amt = Number(e.amount.replace(/[^\d]/g, ""));
       if (amt > 0) {
         const dObj = parseAppDate(e.date);
-        const isInflow = e.type === "Income";
-        items.push({
-          id: `F-EXP-${e.id}`,
-          date: e.date,
-          dateObj: dObj,
-          module: "Finance",
-          type: isInflow ? "Inflow" : "Outflow",
-          category: e.cat,
-          description: e.desc,
-          amount: amt,
-          method: e.method || "Cash",
-        });
+        const type = e.type === "Income" ? "Inflow" : "Outflow";
+        if (e.method === "Cash & Bank") {
+          const cashPart = Math.floor(amt / 2);
+          const bankPart = amt - cashPart;
+          if (cashPart > 0) {
+            items.push({
+              id: `F-EXP-${e.id}-CASH`, date: e.date, dateObj: dObj, module: "Finance", type,
+              category: e.cat, description: `${e.desc} (Cash portion)`, amount: cashPart, method: "Cash",
+            });
+          }
+          if (bankPart > 0) {
+            items.push({
+              id: `F-EXP-${e.id}-BANK`, date: e.date, dateObj: dObj, module: "Finance", type,
+              category: e.cat, description: `${e.desc} (Bank portion)`, amount: bankPart, method: "UPI",
+            });
+          }
+        } else {
+          items.push({
+            id: `F-EXP-${e.id}`,
+            date: e.date,
+            dateObj: dObj,
+            module: "Finance",
+            type,
+            category: e.cat,
+            description: e.desc,
+            amount: amt,
+            method: e.method === "Cash" || !e.method ? "Cash" : "UPI",
+          });
+        }
       }
     });
 
@@ -148,17 +194,37 @@ export function CashFlowDashboard() {
       const amt = Number(i.amount.replace(/[^\d]/g, ""));
       if (amt > 0) {
         const dObj = parseAppDate(i.date || "");
-        items.push({
-          id: `F-INV-${i.id}`,
-          date: i.date || "01 Jun 2026",
-          dateObj: dObj,
-          module: "Finance",
-          type: "Inflow",
-          category: "Capital Investment",
-          description: `Capital deployed by investor: ${i.investor}`,
-          amount: amt,
-          method: i.method || "UPI",
-        });
+        const date = i.date || "01 Jun 2026";
+        if (i.method === "Cash & Bank") {
+          const cashPart = Math.floor(amt / 2);
+          const bankPart = amt - cashPart;
+          if (cashPart > 0) {
+            items.push({
+              id: `F-INV-${i.id}-CASH`, date, dateObj: dObj, module: "Finance", type: "Inflow",
+              category: "Capital Investment", description: `Capital deployed by investor: ${i.investor} (Cash portion)`,
+              amount: cashPart, method: "Cash",
+            });
+          }
+          if (bankPart > 0) {
+            items.push({
+              id: `F-INV-${i.id}-BANK`, date, dateObj: dObj, module: "Finance", type: "Inflow",
+              category: "Capital Investment", description: `Capital deployed by investor: ${i.investor} (Bank portion)`,
+              amount: bankPart, method: "UPI",
+            });
+          }
+        } else {
+          items.push({
+            id: `F-INV-${i.id}`,
+            date,
+            dateObj: dObj,
+            module: "Finance",
+            type: "Inflow",
+            category: "Capital Investment",
+            description: `Capital deployed by investor: ${i.investor}`,
+            amount: amt,
+            method: i.method === "Cash" ? "Cash" : "UPI",
+          });
+        }
       }
     });
 

@@ -85,7 +85,7 @@ function RolesPage() {
     }
   };
 
-  const handleAddStaffSubmit = (e: React.FormEvent) => {
+  const handleAddStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!staffName.trim()) {
       toast.error("Please enter a name");
@@ -101,21 +101,24 @@ function RolesPage() {
       return;
     }
 
-    addStaff({
-      name: staffName.trim(),
-      email: staffEmail.trim().toLowerCase(),
-      role: staffRole,
-      access: staffAccess,
-      password: staffPassword.trim(),
-    });
-
-    toast.success(`Staff member "${staffName}" added & synced successfully`);
-    setStaffName("");
-    setStaffEmail("");
-    setStaffRole("Staff");
-    setStaffAccess("Both");
-    setStaffPassword("");
-    setShowAddStaff(false);
+    try {
+      await addStaff({
+        name: staffName.trim(),
+        email: staffEmail.trim().toLowerCase(),
+        role: staffRole,
+        access: staffAccess,
+        password: staffPassword.trim(),
+      });
+      toast.success(`Staff member "${staffName}" added & synced successfully`);
+      setStaffName("");
+      setStaffEmail("");
+      setStaffRole("Staff");
+      setStaffAccess("Both");
+      setStaffPassword("");
+      setShowAddStaff(false);
+    } catch (err) {
+      toast.error("Failed to add staff member");
+    }
   };
 
   const handleEditStaffClick = (member: Staff) => {
@@ -124,11 +127,14 @@ function RolesPage() {
     setEditEmail(member.email);
     setEditRole(member.role);
     setEditAccess(member.access || "Both");
-    setEditPassword(member.password || "");
+    // Never pre-fill an existing password — it's hashed (or, for a
+    // not-yet-migrated legacy account, still plaintext but shouldn't be
+    // echoed back either way). Left blank, submitting keeps it unchanged.
+    setEditPassword("");
     setEditStatus(member.status || "Active");
   };
 
-  const handleEditStaffSubmit = (e: React.FormEvent) => {
+  const handleEditStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
     if (!editName.trim()) {
@@ -146,17 +152,20 @@ function RolesPage() {
       return;
     }
 
-    updateStaff(editingStaff.id, {
-      name: editName.trim(),
-      email: editEmail.trim().toLowerCase(),
-      role: editRole,
-      access: editAccess,
-      password: editPassword.trim(),
-      status: editStatus,
-    });
-
-    toast.success(`Staff member "${editName}" updated & synced`);
-    setEditingStaff(null);
+    try {
+      await updateStaff(editingStaff.id, {
+        name: editName.trim(),
+        email: editEmail.trim().toLowerCase(),
+        role: editRole,
+        access: editAccess,
+        password: editPassword.trim(),
+        status: editStatus,
+      });
+      toast.success(`Staff member "${editName}" updated & synced`);
+      setEditingStaff(null);
+    } catch (err) {
+      toast.error("Failed to update staff member");
+    }
   };
 
   const handleDeleteStaffClick = (id: string, name: string) => {
@@ -390,7 +399,7 @@ function RolesPage() {
                   type="password"
                   value={staffPassword}
                   onChange={(e) => setStaffPassword(e.target.value)}
-                  placeholder="e.g. Avinash@123"
+                  placeholder="Leave blank for OTP-only sign in"
                   className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-foreground"
                 />
               </div>

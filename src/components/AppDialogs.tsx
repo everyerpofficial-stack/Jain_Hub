@@ -10,7 +10,7 @@ import {
 import {
   MOBILE_BRANDS, RAM_ROM_OPTIONS, INTEREST_OPTIONS, EMI_COUNT_OPTIONS,
   REGIONS, calcEmi, useStore, formatDateToInr, formatDateToYmd,
-  VILLAGES_BY_REGION,
+  VILLAGES_BY_REGION, type Payment, type Expense, type Investment,
 } from "@/lib/store";
 
 type DialogKey = null | "customer" | "loan" | "expense" | "investment" | "payment" | "report" | "collect";
@@ -446,14 +446,18 @@ function CustomerDialog() {
 function CollectDialog() {
   const { open, close, prefill } = useUi();
   const customers = useStore((s) => s.customers);
+  const staff = useStore((s) => s.staff);
+  const currentUser = useStore((s) => s.currentUser);
   const recordPayment = useStore((s) => s.recordPayment);
+
+  const defaultCollector = currentUser?.name || staff[0]?.name || "Avinash G";
 
   const [customerId, setCustomerId] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("Cash");
   const [cashAmount, setCashAmount] = useState<number | "">("");
   const [bankAmount, setBankAmount] = useState<number | "">("");
-  const [collector, setCollector] = useState("Rajesh Jain");
+  const [collector, setCollector] = useState(defaultCollector);
   const [customCollectorName, setCustomCollectorName] = useState("");
   const [remarks, setRemarks] = useState("");
   const [date, setDate] = useState(getTodayYmd());
@@ -472,11 +476,11 @@ function CollectDialog() {
       }
       setRemarks("");
       setDate(getTodayYmd());
-      setCollector("Rajesh Jain");
+      setCollector(currentUser?.name || staff[0]?.name || "Avinash G");
       setCustomCollectorName("");
       setMethod("Cash");
     }
-  }, [open, prefill, customers]);
+  }, [open, prefill, customers, currentUser, staff]);
 
   useEffect(() => {
     if (customer) {
@@ -555,7 +559,7 @@ function CollectDialog() {
           <div className="grid grid-cols-2 gap-3">
             <Select label="Payment Mode" value={method} onChange={handleMethodChange} options={["Cash", "Bank", "Cash & Bank"]} />
             <Select label="Collector" value={collector} onChange={setCollector}
-              options={["Rajesh Jain", "Suresh Patil", "Ramesh Kumar", "Other (Manual Entry)"]} />
+              options={Array.from(new Set([...staff.map((s) => s.name).filter(Boolean), "Other (Manual Entry)"]))} />
           </div>
 
           {method === "Cash & Bank" && (
@@ -599,7 +603,11 @@ function CollectDialog() {
               const finalRemarks = method === "Cash & Bank"
                 ? `${remarks ? remarks + " " : ""}[Cash: ₹${cashAmount} | Bank: ₹${bankAmount}]`
                 : remarks;
-              recordPayment({ customerId, amount: Number(amount), method: method as "Cash" | "UPI", collector: activeCollector, remarks: finalRemarks, date });
+              recordPayment({
+                customerId, amount: Number(amount), method: method as Payment["method"], collector: activeCollector, remarks: finalRemarks, date,
+                cashAmount: method === "Cash & Bank" ? Number(cashAmount) || 0 : undefined,
+                bankAmount: method === "Cash & Bank" ? Number(bankAmount) || 0 : undefined,
+              });
               toast.success(`₹${Number(amount).toLocaleString("en-IN")} (${method}) recorded for ${customer?.name}`);
               close();
             }}
@@ -666,7 +674,7 @@ function ExpenseDialog() {
         <DialogFooter>
           <GhostBtn onClick={close}>Cancel</GhostBtn>
           <PrimaryBtn disabled={!amount || !desc || !date} onClick={() => {
-            const e = addExpense({ cat, desc, amount: Number(amount), type, date, method: method as "Cash" | "UPI" });
+            const e = addExpense({ cat, desc, amount: Number(amount), type, date, method: method as Expense["method"] });
             toast.success(`${type} entry ${e.id} recorded successfully`);
             setDesc(""); setAmount(""); close();
           }}>Save Entry</PrimaryBtn>
@@ -721,7 +729,7 @@ function InvestmentDialog() {
         <DialogFooter>
           <GhostBtn onClick={close}>Cancel</GhostBtn>
           <PrimaryBtn disabled={!investor || !amount || !date} onClick={() => {
-            const i = addInvestment({ investor, amount: Number(amount), roi: Number(roi), maturity, date, method: method as "Cash" | "UPI" });
+            const i = addInvestment({ investor, amount: Number(amount), roi: Number(roi), maturity, date, method: method as Investment["method"] });
             toast.success(`Investment ${i.id} added`);
             close();
           }}>Save</PrimaryBtn>

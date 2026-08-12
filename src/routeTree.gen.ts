@@ -9,92 +9,37 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as RolesRouteImport } from './routes/roles'
-import { Route as ReportsRouteImport } from './routes/reports'
-import { Route as ProfitLossRouteImport } from './routes/profit-loss'
-import { Route as PaymentsRouteImport } from './routes/payments'
-import { Route as LoansRouteImport } from './routes/loans'
-import { Route as InvestmentsRouteImport } from './routes/investments'
-import { Route as ExpensesRouteImport } from './routes/expenses'
-import { Route as DocumentsRouteImport } from './routes/documents'
-import { Route as CustomersRouteImport } from './routes/customers'
-import { Route as CollectionsRouteImport } from './routes/collections'
-import { Route as CashFlowRouteImport } from './routes/cash-flow'
-import { Route as AuditRouteImport } from './routes/audit'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuditRouteImport } from './routes/audit'
+import { Route as CashFlowRouteImport } from './routes/cash-flow'
+import { Route as CollectionsRouteImport } from './routes/collections'
+import { Route as CustomersRouteImport } from './routes/customers'
+import { Route as DocumentsRouteImport } from './routes/documents'
+import { Route as ExpensesRouteImport } from './routes/expenses'
+import { Route as InvestmentsRouteImport } from './routes/investments'
+import { Route as LoansRouteImport } from './routes/loans'
+import { Route as PaymentsRouteImport } from './routes/payments'
+import { Route as ProfitLossRouteImport } from './routes/profit-loss'
+import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as RolesRouteImport } from './routes/roles'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MobilesIndexRouteImport } from './routes/mobiles/index'
-import { Route as MobilesSuppliersRouteImport } from './routes/mobiles/suppliers'
-import { Route as MobilesSettingsRouteImport } from './routes/mobiles/settings'
-import { Route as MobilesSalesRouteImport } from './routes/mobiles/sales'
-import { Route as MobilesReportsRouteImport } from './routes/mobiles/reports'
-import { Route as MobilesPurchasesRouteImport } from './routes/mobiles/purchases'
-import { Route as MobilesProductsRouteImport } from './routes/mobiles/products'
-import { Route as MobilesInventoryRouteImport } from './routes/mobiles/inventory'
-import { Route as MobilesExpensesRouteImport } from './routes/mobiles/expenses'
-import { Route as MobilesCustomersRouteImport } from './routes/mobiles/customers'
-import { Route as MobilesCashFlowRouteImport } from './routes/mobiles/cash-flow'
-import { Route as MobilesAuditRouteImport } from './routes/mobiles/audit'
 import { Route as MobilesAccessoriesRouteImport } from './routes/mobiles/accessories'
+import { Route as MobilesAuditRouteImport } from './routes/mobiles/audit'
+import { Route as MobilesCashFlowRouteImport } from './routes/mobiles/cash-flow'
+import { Route as MobilesCustomersRouteImport } from './routes/mobiles/customers'
+import { Route as MobilesExpensesRouteImport } from './routes/mobiles/expenses'
+import { Route as MobilesInventoryRouteImport } from './routes/mobiles/inventory'
+import { Route as MobilesProductsRouteImport } from './routes/mobiles/products'
+import { Route as MobilesPurchasesRouteImport } from './routes/mobiles/purchases'
+import { Route as MobilesReportsRouteImport } from './routes/mobiles/reports'
+import { Route as MobilesSalesRouteImport } from './routes/mobiles/sales'
+import { Route as MobilesSettingsRouteImport } from './routes/mobiles/settings'
+import { Route as MobilesSuppliersRouteImport } from './routes/mobiles/suppliers'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RolesRoute = RolesRouteImport.update({
-  id: '/roles',
-  path: '/roles',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReportsRoute = ReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProfitLossRoute = ProfitLossRouteImport.update({
-  id: '/profit-loss',
-  path: '/profit-loss',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PaymentsRoute = PaymentsRouteImport.update({
-  id: '/payments',
-  path: '/payments',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoansRoute = LoansRouteImport.update({
-  id: '/loans',
-  path: '/loans',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const InvestmentsRoute = InvestmentsRouteImport.update({
-  id: '/investments',
-  path: '/investments',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExpensesRoute = ExpensesRouteImport.update({
-  id: '/expenses',
-  path: '/expenses',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocumentsRoute = DocumentsRouteImport.update({
-  id: '/documents',
-  path: '/documents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CustomersRoute = CustomersRouteImport.update({
-  id: '/customers',
-  path: '/customers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CollectionsRoute = CollectionsRouteImport.update({
-  id: '/collections',
-  path: '/collections',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CashFlowRoute = CashFlowRouteImport.update({
-  id: '/cash-flow',
-  path: '/cash-flow',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuditRoute = AuditRouteImport.update({
@@ -102,9 +47,64 @@ const AuditRoute = AuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const CashFlowRoute = CashFlowRouteImport.update({
+  id: '/cash-flow',
+  path: '/cash-flow',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CollectionsRoute = CollectionsRouteImport.update({
+  id: '/collections',
+  path: '/collections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CustomersRoute = CustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocumentsRoute = DocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpensesRoute = ExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestmentsRoute = InvestmentsRouteImport.update({
+  id: '/investments',
+  path: '/investments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoansRoute = LoansRouteImport.update({
+  id: '/loans',
+  path: '/loans',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PaymentsRoute = PaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfitLossRoute = ProfitLossRouteImport.update({
+  id: '/profit-loss',
+  path: '/profit-loss',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RolesRoute = RolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MobilesIndexRoute = MobilesIndexRouteImport.update({
@@ -112,54 +112,9 @@ const MobilesIndexRoute = MobilesIndexRouteImport.update({
   path: '/mobiles/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MobilesSuppliersRoute = MobilesSuppliersRouteImport.update({
-  id: '/mobiles/suppliers',
-  path: '/mobiles/suppliers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesSettingsRoute = MobilesSettingsRouteImport.update({
-  id: '/mobiles/settings',
-  path: '/mobiles/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesSalesRoute = MobilesSalesRouteImport.update({
-  id: '/mobiles/sales',
-  path: '/mobiles/sales',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesReportsRoute = MobilesReportsRouteImport.update({
-  id: '/mobiles/reports',
-  path: '/mobiles/reports',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesPurchasesRoute = MobilesPurchasesRouteImport.update({
-  id: '/mobiles/purchases',
-  path: '/mobiles/purchases',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesProductsRoute = MobilesProductsRouteImport.update({
-  id: '/mobiles/products',
-  path: '/mobiles/products',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesInventoryRoute = MobilesInventoryRouteImport.update({
-  id: '/mobiles/inventory',
-  path: '/mobiles/inventory',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesExpensesRoute = MobilesExpensesRouteImport.update({
-  id: '/mobiles/expenses',
-  path: '/mobiles/expenses',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesCustomersRoute = MobilesCustomersRouteImport.update({
-  id: '/mobiles/customers',
-  path: '/mobiles/customers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MobilesCashFlowRoute = MobilesCashFlowRouteImport.update({
-  id: '/mobiles/cash-flow',
-  path: '/mobiles/cash-flow',
+const MobilesAccessoriesRoute = MobilesAccessoriesRouteImport.update({
+  id: '/mobiles/accessories',
+  path: '/mobiles/accessories',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MobilesAuditRoute = MobilesAuditRouteImport.update({
@@ -167,9 +122,54 @@ const MobilesAuditRoute = MobilesAuditRouteImport.update({
   path: '/mobiles/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MobilesAccessoriesRoute = MobilesAccessoriesRouteImport.update({
-  id: '/mobiles/accessories',
-  path: '/mobiles/accessories',
+const MobilesCashFlowRoute = MobilesCashFlowRouteImport.update({
+  id: '/mobiles/cash-flow',
+  path: '/mobiles/cash-flow',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesCustomersRoute = MobilesCustomersRouteImport.update({
+  id: '/mobiles/customers',
+  path: '/mobiles/customers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesExpensesRoute = MobilesExpensesRouteImport.update({
+  id: '/mobiles/expenses',
+  path: '/mobiles/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesInventoryRoute = MobilesInventoryRouteImport.update({
+  id: '/mobiles/inventory',
+  path: '/mobiles/inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesProductsRoute = MobilesProductsRouteImport.update({
+  id: '/mobiles/products',
+  path: '/mobiles/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesPurchasesRoute = MobilesPurchasesRouteImport.update({
+  id: '/mobiles/purchases',
+  path: '/mobiles/purchases',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesReportsRoute = MobilesReportsRouteImport.update({
+  id: '/mobiles/reports',
+  path: '/mobiles/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesSalesRoute = MobilesSalesRouteImport.update({
+  id: '/mobiles/sales',
+  path: '/mobiles/sales',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesSettingsRoute = MobilesSettingsRouteImport.update({
+  id: '/mobiles/settings',
+  path: '/mobiles/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MobilesSuppliersRoute = MobilesSuppliersRouteImport.update({
+  id: '/mobiles/suppliers',
+  path: '/mobiles/suppliers',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -383,88 +383,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/roles': {
-      id: '/roles'
-      path: '/roles'
-      fullPath: '/roles'
-      preLoaderRoute: typeof RolesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports': {
-      id: '/reports'
-      path: '/reports'
-      fullPath: '/reports'
-      preLoaderRoute: typeof ReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/profit-loss': {
-      id: '/profit-loss'
-      path: '/profit-loss'
-      fullPath: '/profit-loss'
-      preLoaderRoute: typeof ProfitLossRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/payments': {
-      id: '/payments'
-      path: '/payments'
-      fullPath: '/payments'
-      preLoaderRoute: typeof PaymentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/loans': {
-      id: '/loans'
-      path: '/loans'
-      fullPath: '/loans'
-      preLoaderRoute: typeof LoansRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/investments': {
-      id: '/investments'
-      path: '/investments'
-      fullPath: '/investments'
-      preLoaderRoute: typeof InvestmentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/expenses': {
-      id: '/expenses'
-      path: '/expenses'
-      fullPath: '/expenses'
-      preLoaderRoute: typeof ExpensesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/documents': {
-      id: '/documents'
-      path: '/documents'
-      fullPath: '/documents'
-      preLoaderRoute: typeof DocumentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/customers': {
-      id: '/customers'
-      path: '/customers'
-      fullPath: '/customers'
-      preLoaderRoute: typeof CustomersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/collections': {
-      id: '/collections'
-      path: '/collections'
-      fullPath: '/collections'
-      preLoaderRoute: typeof CollectionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cash-flow': {
-      id: '/cash-flow'
-      path: '/cash-flow'
-      fullPath: '/cash-flow'
-      preLoaderRoute: typeof CashFlowRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/audit': {
@@ -474,11 +397,88 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/cash-flow': {
+      id: '/cash-flow'
+      path: '/cash-flow'
+      fullPath: '/cash-flow'
+      preLoaderRoute: typeof CashFlowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/collections': {
+      id: '/collections'
+      path: '/collections'
+      fullPath: '/collections'
+      preLoaderRoute: typeof CollectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/customers': {
+      id: '/customers'
+      path: '/customers'
+      fullPath: '/customers'
+      preLoaderRoute: typeof CustomersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents': {
+      id: '/documents'
+      path: '/documents'
+      fullPath: '/documents'
+      preLoaderRoute: typeof DocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/expenses': {
+      id: '/expenses'
+      path: '/expenses'
+      fullPath: '/expenses'
+      preLoaderRoute: typeof ExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investments': {
+      id: '/investments'
+      path: '/investments'
+      fullPath: '/investments'
+      preLoaderRoute: typeof InvestmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/loans': {
+      id: '/loans'
+      path: '/loans'
+      fullPath: '/loans'
+      preLoaderRoute: typeof LoansRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/payments': {
+      id: '/payments'
+      path: '/payments'
+      fullPath: '/payments'
+      preLoaderRoute: typeof PaymentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profit-loss': {
+      id: '/profit-loss'
+      path: '/profit-loss'
+      fullPath: '/profit-loss'
+      preLoaderRoute: typeof ProfitLossRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/roles': {
+      id: '/roles'
+      path: '/roles'
+      fullPath: '/roles'
+      preLoaderRoute: typeof RolesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mobiles/': {
@@ -488,74 +488,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MobilesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/mobiles/suppliers': {
-      id: '/mobiles/suppliers'
-      path: '/mobiles/suppliers'
-      fullPath: '/mobiles/suppliers'
-      preLoaderRoute: typeof MobilesSuppliersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/settings': {
-      id: '/mobiles/settings'
-      path: '/mobiles/settings'
-      fullPath: '/mobiles/settings'
-      preLoaderRoute: typeof MobilesSettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/sales': {
-      id: '/mobiles/sales'
-      path: '/mobiles/sales'
-      fullPath: '/mobiles/sales'
-      preLoaderRoute: typeof MobilesSalesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/reports': {
-      id: '/mobiles/reports'
-      path: '/mobiles/reports'
-      fullPath: '/mobiles/reports'
-      preLoaderRoute: typeof MobilesReportsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/purchases': {
-      id: '/mobiles/purchases'
-      path: '/mobiles/purchases'
-      fullPath: '/mobiles/purchases'
-      preLoaderRoute: typeof MobilesPurchasesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/products': {
-      id: '/mobiles/products'
-      path: '/mobiles/products'
-      fullPath: '/mobiles/products'
-      preLoaderRoute: typeof MobilesProductsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/inventory': {
-      id: '/mobiles/inventory'
-      path: '/mobiles/inventory'
-      fullPath: '/mobiles/inventory'
-      preLoaderRoute: typeof MobilesInventoryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/expenses': {
-      id: '/mobiles/expenses'
-      path: '/mobiles/expenses'
-      fullPath: '/mobiles/expenses'
-      preLoaderRoute: typeof MobilesExpensesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/customers': {
-      id: '/mobiles/customers'
-      path: '/mobiles/customers'
-      fullPath: '/mobiles/customers'
-      preLoaderRoute: typeof MobilesCustomersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mobiles/cash-flow': {
-      id: '/mobiles/cash-flow'
-      path: '/mobiles/cash-flow'
-      fullPath: '/mobiles/cash-flow'
-      preLoaderRoute: typeof MobilesCashFlowRouteImport
+    '/mobiles/accessories': {
+      id: '/mobiles/accessories'
+      path: '/mobiles/accessories'
+      fullPath: '/mobiles/accessories'
+      preLoaderRoute: typeof MobilesAccessoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mobiles/audit': {
@@ -565,11 +502,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MobilesAuditRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/mobiles/accessories': {
-      id: '/mobiles/accessories'
-      path: '/mobiles/accessories'
-      fullPath: '/mobiles/accessories'
-      preLoaderRoute: typeof MobilesAccessoriesRouteImport
+    '/mobiles/cash-flow': {
+      id: '/mobiles/cash-flow'
+      path: '/mobiles/cash-flow'
+      fullPath: '/mobiles/cash-flow'
+      preLoaderRoute: typeof MobilesCashFlowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/customers': {
+      id: '/mobiles/customers'
+      path: '/mobiles/customers'
+      fullPath: '/mobiles/customers'
+      preLoaderRoute: typeof MobilesCustomersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/expenses': {
+      id: '/mobiles/expenses'
+      path: '/mobiles/expenses'
+      fullPath: '/mobiles/expenses'
+      preLoaderRoute: typeof MobilesExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/inventory': {
+      id: '/mobiles/inventory'
+      path: '/mobiles/inventory'
+      fullPath: '/mobiles/inventory'
+      preLoaderRoute: typeof MobilesInventoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/products': {
+      id: '/mobiles/products'
+      path: '/mobiles/products'
+      fullPath: '/mobiles/products'
+      preLoaderRoute: typeof MobilesProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/purchases': {
+      id: '/mobiles/purchases'
+      path: '/mobiles/purchases'
+      fullPath: '/mobiles/purchases'
+      preLoaderRoute: typeof MobilesPurchasesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/reports': {
+      id: '/mobiles/reports'
+      path: '/mobiles/reports'
+      fullPath: '/mobiles/reports'
+      preLoaderRoute: typeof MobilesReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/sales': {
+      id: '/mobiles/sales'
+      path: '/mobiles/sales'
+      fullPath: '/mobiles/sales'
+      preLoaderRoute: typeof MobilesSalesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/settings': {
+      id: '/mobiles/settings'
+      path: '/mobiles/settings'
+      fullPath: '/mobiles/settings'
+      preLoaderRoute: typeof MobilesSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mobiles/suppliers': {
+      id: '/mobiles/suppliers'
+      path: '/mobiles/suppliers'
+      fullPath: '/mobiles/suppliers'
+      preLoaderRoute: typeof MobilesSuppliersRouteImport
       parentRoute: typeof rootRouteImport
     }
   }

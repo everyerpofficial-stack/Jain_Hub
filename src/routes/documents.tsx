@@ -85,7 +85,7 @@ function DocumentsPage() {
         <div>
           <h1 className="text-[26px] font-semibold tracking-tight">Document Vault</h1>
           <p className="text-sm text-muted-foreground mt-1 inline-flex items-center gap-1.5">
-            <ShieldCheck className="size-3.5 text-success" /> {filteredDocs.length} documents · Encrypted client storage
+            <ShieldCheck className="size-3.5 text-success" /> {filteredDocs.length} documents · Stored in your organization's database
           </p>
         </div>
       </div>

@@ -94,9 +94,8 @@ export function useDateFilter() {
   const [customEnd, setCustomEnd] = useState("");
 
   const { startDate, endDate } = (() => {
-    const today = new Date();
-    const now = today.getFullYear() < 2026 ? new Date(2026, 5, 19) : today;
-    
+    const now = new Date();
+
     let start: Date | null = null;
     let end: Date | null = null;
 
