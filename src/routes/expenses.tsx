@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Trash2, Download } from "lucide-react";
+import { Plus, Trash2, Download, FileText } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, ProgressBar, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange, downloadExcel } from "@/lib/store";
+import { useStore, parseAppDate, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -145,7 +145,7 @@ function ExpensesPage() {
             {incomeByCat.length + expenseByCat.length} categories · {filteredEntries.length} transaction entries
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => {
               downloadExcel("finance-ledger-cashflow.xlsx", "Income & Expense Ledger", filteredEntries.map((e) => ({
@@ -162,6 +162,37 @@ function ExpensesPage() {
             className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
           >
             <Download className="size-3.5" /> Export Excel
+          </button>
+          <button
+            onClick={() => {
+              const presetLabels: Record<string, string> = {
+                all: "All Time",
+                today: "Today",
+                "this-month": "This Month",
+                "next-month": "Next Month",
+                custom: "Custom Range",
+              };
+              downloadLedgerPDF({
+                title: "Income & Expense Ledger Statement",
+                companyName: "Jain Finance ERP",
+                totalIncome,
+                totalExpenses,
+                netBalance,
+                periodLabel: presetLabels[filterPreset] || "All Time",
+                entries: filteredEntries.map((e) => ({
+                  id: e.id,
+                  date: e.date,
+                  type: e.type || (isIncome(e) ? "Income" : "Expense"),
+                  paymentMode: e.method || "Cash",
+                  cat: e.cat,
+                  desc: e.desc,
+                  amount: e.amount,
+                })),
+              });
+            }}
+            className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
+          >
+            <FileText className="size-3.5 text-rose-500" /> Export PDF
           </button>
           <button onClick={() => openDialog("expense")} className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity cursor-pointer">
             <Plus className="size-3.5" /> Add Income / Expense

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import {
   TrendingUp, TrendingDown, Wallet, IndianRupee,
-  Smartphone, Building, BarChart3, AlertCircle, ArrowUpRight, ArrowDownRight, Search, Activity, Download
+  Smartphone, Building, BarChart3, AlertCircle, ArrowUpRight, ArrowDownRight, Search, Activity, Download, FileText
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -9,7 +9,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { Card, SectionHeader, StatCard, Badge } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange, downloadExcel } from "@/lib/store";
+import { useStore, parseAppDate, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
 import { useMobileStore } from "@/lib/mobileStore";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -515,6 +515,40 @@ export function CashFlowDashboard() {
             className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
           >
             <Download className="size-3.5" /> Export Excel
+          </button>
+
+          <button
+            onClick={() => {
+              const totalInc = activeRawItems.filter((i) => i.type === "Inflow").reduce((sum, i) => sum + i.amount, 0);
+              const totalExp = activeRawItems.filter((i) => i.type === "Outflow").reduce((sum, i) => sum + i.amount, 0);
+              const presetLabels: Record<string, string> = {
+                all: "All Time",
+                today: "Today",
+                "this-month": "This Month",
+                "next-month": "Next Month",
+                custom: "Custom Range",
+              };
+              downloadLedgerPDF({
+                title: `Cash Flow Statement (${activeTab})`,
+                companyName: "Jain Finance & Mobiles",
+                totalIncome: totalInc,
+                totalExpenses: totalExp,
+                netBalance: totalInc - totalExp,
+                periodLabel: presetLabels[filterPreset] || "All Time",
+                entries: activeRawItems.map((item) => ({
+                  id: item.id,
+                  date: item.date,
+                  type: item.type === "Inflow" ? "Income" : "Expense",
+                  paymentMode: item.method,
+                  cat: `[${item.module}] ${item.category}`,
+                  desc: item.description,
+                  amount: item.amount,
+                })),
+              });
+            }}
+            className="h-9 px-3.5 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
+          >
+            <FileText className="size-3.5 text-rose-500" /> Export PDF
           </button>
 
           {/* Tab Selector */}

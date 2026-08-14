@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import XLSX from "xlsx-js-style";
+import { toast } from "sonner";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
 
@@ -1913,6 +1914,178 @@ function triggerDownload(filename: string, blob: Blob) {
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+}
+
+export interface DownloadLedgerPDFOptions {
+  title: string;
+  companyName: string;
+  totalIncome?: number;
+  totalExpenses?: number;
+  netBalance?: number;
+  periodLabel?: string;
+  entries: Array<{
+    id: string;
+    date: string;
+    type?: string;
+    cat?: string;
+    desc?: string;
+    paymentMode?: string;
+    method?: string;
+    amount: string | number;
+  }>;
+}
+
+export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
+  const { title, companyName, totalIncome, totalExpenses, netBalance, periodLabel, entries } = options;
+
+  if (!entries || entries.length === 0) {
+    toast.error("No entries available to export to PDF");
+    return;
+  }
+
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    toast.error("Popup blocked! Please allow popups to view/print PDF");
+    return;
+  }
+
+  const dateStr = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  const timeStr = new Date().toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const isIncomeEntry = (e: any) => e.type === "Income" || String(e.type).toLowerCase() === "income";
+
+  const rowsHtml = entries
+    .map((e) => {
+      const isInc = isIncomeEntry(e);
+      const rawAmt = typeof e.amount === "number" ? e.amount : Number(String(e.amount).replace(/[^\d.-]/g, "")) || 0;
+      const amtStr = `₹${rawAmt.toLocaleString("en-IN")}`;
+      const modeStr = e.paymentMode || e.method || "Cash";
+      const typeStr = e.type || (isInc ? "Income" : "Expense");
+      const badgeStyle = isInc
+        ? "background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;"
+        : "background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb;";
+
+      return `
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 10px 12px; font-weight: 600; color: #0f172a; white-space: nowrap;">${e.id}</td>
+          <td style="padding: 10px 12px; color: #475569; white-space: nowrap;">${e.date}</td>
+          <td style="padding: 10px 12px;">
+            <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; ${badgeStyle}">
+              ${typeStr}
+            </span>
+          </td>
+          <td style="padding: 10px 12px; color: #475569;">${modeStr}</td>
+          <td style="padding: 10px 12px; font-weight: 500; color: #1e293b;">${e.cat || "-"}</td>
+          <td style="padding: 10px 12px; color: #475569; max-width: 240px; word-break: break-word;">${e.desc || "-"}</td>
+          <td style="padding: 10px 12px; text-align: right; font-weight: 700; color: ${isInc ? "#16a34a" : "#0f172a"}; white-space: nowrap;">
+            ${isInc ? `+ ${amtStr}` : `- ${amtStr}`}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  let statsHtml = "";
+  if (totalIncome !== undefined || totalExpenses !== undefined || netBalance !== undefined) {
+    statsHtml = `
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;">
+          <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px;">Total Income</div>
+          <div style="font-size: 20px; font-weight: 800; color: #16a34a; margin-top: 4px;">₹${(totalIncome || 0).toLocaleString("en-IN")}</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;">
+          <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px;">Total Expenses</div>
+          <div style="font-size: 20px; font-weight: 800; color: #dc2626; margin-top: 4px;">₹${(totalExpenses || 0).toLocaleString("en-IN")}</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;">
+          <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px;">Net Balance</div>
+          <div style="font-size: 20px; font-weight: 800; color: ${(netBalance || 0) >= 0 ? "#16a34a" : "#dc2626"}; margin-top: 4px;">
+            ${(netBalance || 0) >= 0 ? "+" : ""}₹${(netBalance || 0).toLocaleString("en-IN")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title} - ${companyName}</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+          * { box-sizing: border-box; }
+          body { font-family: 'Inter', sans-serif; padding: 32px; color: #0f172a; background: #ffffff; margin: 0; font-size: 12px; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 20px; }
+          .brand-title { font-size: 22px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; margin: 0; }
+          .doc-subtitle { font-size: 13px; font-weight: 600; color: #475569; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+          .meta-info { text-align: right; font-size: 11px; color: #64748b; line-height: 1.5; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; text-align: left; }
+          th { padding: 10px 12px; border-bottom: 2px solid #cbd5e1; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; background-color: #f8fafc; letter-spacing: 0.5px; }
+          tr:nth-child(even) { background-color: #f8fafc; }
+          .footer { margin-top: 32px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+          @media print {
+            body { padding: 0; }
+            @page { size: A4 portrait; margin: 15mm; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="brand-title">${companyName}</h1>
+            <div class="doc-subtitle">${title}</div>
+          </div>
+          <div class="meta-info">
+            <div><strong>Generated:</strong> ${dateStr} ${timeStr}</div>
+            ${periodLabel ? `<div><strong>Date Scope:</strong> ${periodLabel}</div>` : ""}
+            <div><strong>Total Entries:</strong> ${entries.length}</div>
+          </div>
+        </div>
+
+        ${statsHtml}
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 12%;">Reference</th>
+              <th style="width: 12%;">Date</th>
+              <th style="width: 10%;">Type</th>
+              <th style="width: 12%;">Mode</th>
+              <th style="width: 18%;">Category</th>
+              <th>Description</th>
+              <th style="text-align: right; width: 14%;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          ${companyName} · Confidential Expense & Income Ledger Report · Generated Automatically
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+  toast.success(`${title} PDF ready for print/download`);
 }
 
 // ---- Shared Date Utilities ----
