@@ -284,17 +284,51 @@ export function CashFlowDashboard() {
       if (amt > 0) {
         const dObj = parseAppDate(e.date);
         const isInflow = e.type === "Income";
-        items.push({
-          id: `M-EXP-${e.id}`,
-          date: e.date,
-          dateObj: dObj,
-          module: "Mobiles",
-          type: isInflow ? "Inflow" : "Outflow",
-          category: e.cat,
-          description: e.desc,
-          amount: amt,
-          method: e.paymentMode === "Cash" ? "Cash" : "UPI",
-        });
+        const flowType = isInflow ? "Inflow" : "Outflow";
+
+        if (e.paymentMode === "Cash & UPI" || e.paymentMode === "Cash & Bank") {
+          const cashPart = e.cashAmount !== undefined ? e.cashAmount : Math.floor(amt / 2);
+          const bankPart = e.bankAmount !== undefined ? e.bankAmount : (amt - cashPart);
+          
+          if (cashPart > 0) {
+            items.push({
+              id: `M-EXP-${e.id}-CASH`,
+              date: e.date,
+              dateObj: dObj,
+              module: "Mobiles",
+              type: flowType,
+              category: e.cat,
+              description: `${e.desc} (Cash portion)`,
+              amount: cashPart,
+              method: "Cash",
+            });
+          }
+          if (bankPart > 0) {
+            items.push({
+              id: `M-EXP-${e.id}-BANK`,
+              date: e.date,
+              dateObj: dObj,
+              module: "Mobiles",
+              type: flowType,
+              category: e.cat,
+              description: `${e.desc} (UPI/Bank portion)`,
+              amount: bankPart,
+              method: "UPI",
+            });
+          }
+        } else {
+          items.push({
+            id: `M-EXP-${e.id}`,
+            date: e.date,
+            dateObj: dObj,
+            module: "Mobiles",
+            type: flowType,
+            category: e.cat,
+            description: e.desc,
+            amount: amt,
+            method: e.paymentMode === "Cash" ? "Cash" : "UPI",
+          });
+        }
       }
     });
 

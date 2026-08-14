@@ -27,11 +27,15 @@ function AccessoryFormDialog({
 }) {
   const addAccessory = useMobileStore((s) => s.addAccessory);
   const updateAccessory = useMobileStore((s) => s.updateAccessory);
+  const addExpense = useMobileStore((s) => s.addExpense);
 
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Other");
   const [stock, setStock] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
+  const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
+  const [cashAmount, setCashAmount] = useState<number | "">("");
+  const [bankAmount, setBankAmount] = useState<number | "">("");
 
   useState(() => {
     if (accessory) {
@@ -42,15 +46,50 @@ function AccessoryFormDialog({
     }
   });
 
+  const totalCost = (Number(stock) || 0) * (Number(purchasePrice) || 0);
+
+  const handleModeChange = (mode: "Cash" | "UPI" | "Cash & UPI") => {
+    setPaymentMode(mode);
+    if (mode === "Cash & UPI") {
+      const half = Math.floor(totalCost / 2);
+      setCashAmount(half);
+      setBankAmount(totalCost - half);
+    }
+  };
+
+  const handleStockOrPriceChange = (newStockStr: string, newPriceStr: string) => {
+    const sVal = Number(newStockStr) || 0;
+    const pVal = Number(newPriceStr) || 0;
+    const tot = sVal * pVal;
+    if (paymentMode === "Cash & UPI") {
+      const half = Math.floor(tot / 2);
+      setCashAmount(half);
+      setBankAmount(tot - half);
+    }
+  };
+
   const canSubmit = name.trim() && stock && purchasePrice && Number(stock) > 0 && Number(purchasePrice) >= 0;
 
   const handleSave = () => {
+    const stockNum = Math.min(999999, Math.max(0, Number(stock)));
+    const priceNum = Math.min(99999999, Math.max(0, Number(purchasePrice)));
+    const cost = stockNum * priceNum;
+
+    if (paymentMode === "Cash & UPI" && cost > 0) {
+      const c = Number(cashAmount) || 0;
+      const b = Number(bankAmount) || 0;
+      if (c + b !== cost) {
+        toast.error(`Cash (₹${c}) + Bank (₹${b}) must equal Total Cost (₹${cost})`);
+        return;
+      }
+    }
+
     const data = {
       name: name.trim(),
       category: category.trim() || "Other",
-      stock: Math.min(999999, Math.max(0, Number(stock))),
+      stock: stockNum,
       minLimit: 0,
-      purchasePrice: Math.min(99999999, Math.max(0, Number(purchasePrice))),
+      purchasePrice: priceNum,
       sellingPrice: 0
     };
 
@@ -59,7 +98,20 @@ function AccessoryFormDialog({
       toast.success(`Accessory updated: ${name}`);
     } else {
       addAccessory(data);
-      toast.success(`Accessory registered: ${name}`);
+      if (cost > 0) {
+        addExpense({
+          cat: "Stock Purchase",
+          desc: `Procurement: ${stockNum} units of ${name.trim()} (${category.trim() || "Other"})`,
+          amount: String(cost),
+          type: "Expense",
+          paymentMode,
+          cashAmount: paymentMode === "Cash & UPI" ? Number(cashAmount) || 0 : undefined,
+          bankAmount: paymentMode === "Cash & UPI" ? Number(bankAmount) || 0 : undefined,
+        });
+        toast.success(`Accessory stock added & ₹${cost.toLocaleString("en-IN")} procurement logged in Cash/Bank Flow (${paymentMode})`);
+      } else {
+        toast.success(`Accessory registered: ${name}`);
+      }
     }
     onClose();
   };
@@ -105,7 +157,11 @@ function AccessoryFormDialog({
                 min="1"
                 max="999999"
                 value={stock}
-                onChange={(e) => setStock(e.target.value.slice(0, 6))}
+                onChange={(e) => {
+                  const val = e.target.value.slice(0, 6);
+                  setStock(val);
+                  handleStockOrPriceChange(val, purchasePrice);
+                }}
                 placeholder="10"
                 className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
               />
@@ -117,12 +173,66 @@ function AccessoryFormDialog({
                 min="0"
                 max="99999999"
                 value={purchasePrice}
-                onChange={(e) => setPurchasePrice(e.target.value.slice(0, 8))}
+                onChange={(e) => {
+                  const val = e.target.value.slice(0, 8);
+                  setPurchasePrice(val);
+                  handleStockOrPriceChange(stock, val);
+                }}
                 placeholder="1000"
                 className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
               />
             </label>
           </div>
+
+          {!accessory && totalCost > 0 && (
+            <>
+              <label className="block">
+                <span className="text-xs font-semibold text-muted-foreground">Procurement Payment Account</span>
+                <select
+                  value={paymentMode}
+                  onChange={(e) => handleModeChange(e.target.value as "Cash" | "UPI" | "Cash & UPI")}
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm font-semibold focus:ring-2 focus:ring-ring/20 focus:outline-none"
+                >
+                  <option value="Cash">Cash Account</option>
+                  <option value="UPI font-medium">Bank Account (UPI / Net Banking)</option>
+                  <option value="Cash & UPI">Cash & Bank (Split Payment)</option>
+                </select>
+              </label>
+
+              {paymentMode === "Cash & UPI" && (
+                <div className="grid grid-cols-2 gap-3 bg-muted/20 p-2.5 rounded-lg border border-border">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-muted-foreground">Cash (₹)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={cashAmount}
+                      onChange={(e) => {
+                        const c = Math.max(0, Number(e.target.value) || 0);
+                        setCashAmount(c);
+                        setBankAmount(Math.max(0, totalCost - c));
+                      }}
+                      className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-muted-foreground">Bank / UPI (₹)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={bankAmount}
+                      onChange={(e) => {
+                        const b = Math.max(0, Number(e.target.value) || 0);
+                        setBankAmount(b);
+                        setCashAmount(Math.max(0, totalCost - b));
+                      }}
+                      className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none"
+                    />
+                  </label>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <DialogFooter className="border-t border-border pt-4 flex gap-2">
@@ -153,8 +263,36 @@ function SellAccessoryDialog({
   onClose: () => void;
 }) {
   const sellAccessory = useMobileStore((s) => s.sellAccessory);
+  const addExpense = useMobileStore((s) => s.addExpense);
+
   const [qty, setQty] = useState("1");
   const [price, setPrice] = useState("");
+  const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
+  const [cashAmount, setCashAmount] = useState<number | "">("");
+  const [bankAmount, setBankAmount] = useState<number | "">("");
+
+  const rawCost = (Number(price) || 0) * (Number(qty) || 0);
+  const cost = isFinite(rawCost) && rawCost >= 0 && rawCost < 1e12 ? rawCost : 0;
+
+  const handleModeChange = (mode: "Cash" | "UPI" | "Cash & UPI") => {
+    setPaymentMode(mode);
+    if (mode === "Cash & UPI") {
+      const half = Math.floor(cost / 2);
+      setCashAmount(half);
+      setBankAmount(cost - half);
+    }
+  };
+
+  const handlePriceOrQtyChange = (newQtyStr: string, newPriceStr: string) => {
+    const qVal = Number(newQtyStr) || 0;
+    const pVal = Number(newPriceStr) || 0;
+    const tot = qVal * pVal;
+    if (paymentMode === "Cash & UPI") {
+      const half = Math.floor(tot / 2);
+      setCashAmount(half);
+      setBankAmount(tot - half);
+    }
+  };
 
   const handleCheckout = () => {
     const sellQty = Number(qty);
@@ -167,14 +305,33 @@ function SellAccessoryDialog({
       toast.error("Please enter a valid selling price");
       return;
     }
-    sellAccessory(accessory.id, sellQty);
     const totalCalc = sellPrice * sellQty;
-    toast.success(`Sold ${sellQty} unit(s) of ${accessory.name} for ₹${isFinite(totalCalc) ? totalCalc.toLocaleString("en-IN") : totalCalc}`);
+
+    if (paymentMode === "Cash & UPI") {
+      const c = Number(cashAmount) || 0;
+      const b = Number(bankAmount) || 0;
+      if (c + b !== totalCalc) {
+        toast.error(`Cash (₹${c}) + Bank (₹${b}) must equal Total Price (₹${totalCalc})`);
+        return;
+      }
+    }
+
+    sellAccessory(accessory.id, sellQty);
+
+    // Record Income entry in Mobile Expenses -> Cash & UPI Flow
+    addExpense({
+      cat: "Accessories Income",
+      desc: `Sale: ${sellQty} unit(s) of ${accessory.name} @ ₹${sellPrice}/unit`,
+      amount: String(totalCalc),
+      type: "Income",
+      paymentMode,
+      cashAmount: paymentMode === "Cash & UPI" ? Number(cashAmount) || 0 : undefined,
+      bankAmount: paymentMode === "Cash & UPI" ? Number(bankAmount) || 0 : undefined,
+    });
+
+    toast.success(`Sold ${sellQty} unit(s) of ${accessory.name} for ₹${isFinite(totalCalc) ? totalCalc.toLocaleString("en-IN") : totalCalc} (${paymentMode})`);
     onClose();
   };
-
-  const rawCost = (Number(price) || 0) * (Number(qty) || 0);
-  const cost = isFinite(rawCost) && rawCost >= 0 && rawCost < 1e12 ? rawCost : 0;
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
@@ -205,6 +362,7 @@ function SellAccessoryDialog({
               onChange={(e) => {
                 const val = e.target.value.slice(0, 6);
                 setQty(val);
+                handlePriceOrQtyChange(val, price);
               }}
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
             />
@@ -220,11 +378,58 @@ function SellAccessoryDialog({
               onChange={(e) => {
                 const val = e.target.value.slice(0, 8);
                 setPrice(val);
+                handlePriceOrQtyChange(qty, val);
               }}
               placeholder="e.g. 1200"
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
             />
           </label>
+
+          <label className="block">
+            <span className="text-xs font-semibold text-muted-foreground">Payment Account (Cash / Bank)</span>
+            <select
+              value={paymentMode}
+              onChange={(e) => handleModeChange(e.target.value as "Cash" | "UPI" | "Cash & UPI")}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm font-semibold focus:ring-2 focus:ring-ring/20 focus:outline-none"
+            >
+              <option value="Cash">Cash Account</option>
+              <option value="UPI">Bank Account (UPI / Net Banking)</option>
+              <option value="Cash & UPI">Cash & Bank (Split Payment)</option>
+            </select>
+          </label>
+
+          {paymentMode === "Cash & UPI" && (
+            <div className="grid grid-cols-2 gap-3 bg-muted/20 p-2.5 rounded-lg border border-border">
+              <label className="block">
+                <span className="text-xs font-semibold text-muted-foreground">Cash Received (₹)</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={cashAmount}
+                  onChange={(e) => {
+                    const c = Math.max(0, Number(e.target.value) || 0);
+                    setCashAmount(c);
+                    setBankAmount(Math.max(0, cost - c));
+                  }}
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-muted-foreground">Bank Received (₹)</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={bankAmount}
+                  onChange={(e) => {
+                    const b = Math.max(0, Number(e.target.value) || 0);
+                    setBankAmount(b);
+                    setCashAmount(Math.max(0, cost - b));
+                  }}
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none"
+                />
+              </label>
+            </div>
+          )}
 
           <div className="flex justify-between items-center text-xs border-t border-border pt-3">
             <span className="text-muted-foreground font-semibold">Total Price:</span>
