@@ -193,9 +193,9 @@ function AccessoryFormDialog({
                   onChange={(e) => handleModeChange(e.target.value as "Cash" | "UPI" | "Cash & UPI")}
                   className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm font-semibold focus:ring-2 focus:ring-ring/20 focus:outline-none"
                 >
-                  <option value="Cash">Cash Account</option>
-                  <option value="UPI font-medium">Bank Account (UPI / Net Banking)</option>
-                  <option value="Cash & UPI">Cash & Bank (Split Payment)</option>
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cash & UPI">Cash and UPI</option>
                 </select>
               </label>
 
@@ -392,9 +392,9 @@ function SellAccessoryDialog({
               onChange={(e) => handleModeChange(e.target.value as "Cash" | "UPI" | "Cash & UPI")}
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm font-semibold focus:ring-2 focus:ring-ring/20 focus:outline-none"
             >
-              <option value="Cash">Cash Account</option>
-              <option value="UPI">Bank Account (UPI / Net Banking)</option>
-              <option value="Cash & UPI">Cash & Bank (Split Payment)</option>
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="Cash & UPI">Cash and UPI</option>
             </select>
           </label>
 

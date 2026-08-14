@@ -150,7 +150,7 @@ function ExpenseFormDialog({ onClose }: { onClose: () => void }) {
             >
               <option value="Cash">Cash</option>
               <option value="UPI">UPI</option>
-              <option value="Cash & UPI">Cash & UPI</option>
+              <option value="Cash & UPI">Cash and UPI</option>
             </select>
           </label>
 
