@@ -21,6 +21,7 @@ const financeNav = [
   ]},
   { group: "Operations", items: [
     { to: "/customers", label: "Master Data", icon: Users },
+    { to: "/loans", label: "Loans", icon: HandCoins },
     { to: "/collections", label: "Due List", icon: HandCoins },
     { to: "/payments", label: "Payment History", icon: Receipt },
     { to: "/documents", label: "Documents", icon: FileText },
@@ -135,38 +136,45 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
     return () => document.removeEventListener("mousedown", onOutside);
   }, []);
 
+  // Records reconciled from Google Sheets can carry undefined/blank fields
+  // (missing column, empty cell), so every candidate is coerced before
+  // matching — an unguarded .toLowerCase() here threw and took down the
+  // whole AppShell, i.e. every page in the app, not just the search box.
+  const nq = q.trim().toLowerCase();
+  const S = (v: unknown) => String(v ?? "").toLowerCase();
+
   // Build search results across either Finance or Mobiles datasets
   const searchResults = q.trim().length >= 2
     ? isMobileModule
       ? [
           ...mCustomers
-            .filter((c) => [c.name, c.mobile].some((v) => v.toLowerCase().includes(q.toLowerCase())))
+            .filter((c) => [c.name, c.mobile].some((v) => S(v).includes(nq)))
             .slice(0, 3)
             .map((c) => ({ label: c.name, sub: `Customer · ${c.mobile}`, href: "/mobiles/customers", icon: "👤" })),
           ...mProducts
-            .filter((p) => [p.name, p.brand, p.model].some((v) => v.toLowerCase().includes(q.toLowerCase())))
+            .filter((p) => [p.name, p.brand, p.model].some((v) => S(v).includes(nq)))
             .slice(0, 3)
             .map((p) => ({ label: p.name, sub: `Product · ${p.brand} ${p.model}`, href: "/mobiles/products", icon: "📱" })),
           ...mSales
-            .filter((s) => [s.id, s.customerName].some((v) => v.toLowerCase().includes(q.toLowerCase())))
+            .filter((s) => [s.id, s.customerName].some((v) => S(v).includes(nq)))
             .slice(0, 3)
             .map((s) => ({ label: s.id, sub: `Sale Bill · ${s.customerName}`, href: "/mobiles/sales", icon: "🧾" })),
           ...mSuppliers
-            .filter((s) => [s.name, s.gstNo].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())))
+            .filter((s) => [s.name, s.gstNo].some((v) => S(v).includes(nq)))
             .slice(0, 3)
             .map((s) => ({ label: s.name, sub: `Supplier · ${s.gstNo || "—"}`, href: "/mobiles/suppliers", icon: "🤝" })),
         ]
       : [
           ...customers
-            .filter((c) => [c.name, c.id, c.village, c.mobile].some((v) => v.toLowerCase().includes(q.toLowerCase())))
+            .filter((c) => [c.name, c.id, c.village, c.mobile].some((v) => S(v).includes(nq)))
             .slice(0, 4)
             .map((c) => ({ label: c.name, sub: `${c.id} · ${c.village}`, href: "/customers", icon: "👤" })),
           ...(loans ?? [])
-            .filter((l) => [l.id, l.customer, l.product].some((v) => v.toLowerCase().includes(q.toLowerCase())))
+            .filter((l) => [l.id, l.customer, l.product].some((v) => S(v).includes(nq)))
             .slice(0, 3)
             .map((l) => ({ label: l.id, sub: `${l.customer} · ${l.amount}`, href: "/loans", icon: "💰" })),
           ...payments
-            .filter((p) => [p.id, p.customer].some((v) => v.toLowerCase().includes(q.toLowerCase())))
+            .filter((p) => [p.id, p.customer].some((v) => S(v).includes(nq)))
             .slice(0, 3)
             .map((p) => ({ label: p.id, sub: `${p.customer} · ${p.amount}`, href: "/payments", icon: "🧾" })),
         ]
@@ -259,7 +267,7 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
       <div className="border-t border-border p-3 flex items-center gap-2">
         <div className="size-8 rounded-full bg-foreground text-background grid place-items-center text-xs font-semibold">
           {currentUser?.name
-            ? currentUser.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+            ? currentUser.name.split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2)
             : "AG"}
         </div>
         <div className="flex-1 min-w-0">

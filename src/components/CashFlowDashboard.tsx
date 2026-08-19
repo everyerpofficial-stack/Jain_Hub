@@ -9,7 +9,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { Card, SectionHeader, StatCard, Badge } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
+import { useStore, parseAppDate, parseAmount, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
 import { useMobileStore } from "@/lib/mobileStore";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -109,7 +109,7 @@ export function CashFlowDashboard() {
     // and understated bank balance for every split payment.
     fPayments.forEach((p) => {
       if (p.status === "Success") {
-        const amt = Number(p.amount.replace(/[^\d]/g, ""));
+        const amt = parseAmount(p.amount);
         if (amt > 0) {
           const dObj = parseAppDate(p.date);
           if (p.method === "Cash & Bank") {
@@ -154,7 +154,7 @@ export function CashFlowDashboard() {
     // "Cash & UPI" sales (see mobiles/sales.tsx) — rather than dumping the
     // full amount into one bucket, which would misstate cash-in-hand.
     fExpenses.forEach((e) => {
-      const amt = Number(e.amount.replace(/[^\d]/g, ""));
+      const amt = parseAmount(e.amount);
       if (amt > 0) {
         const dObj = parseAppDate(e.date);
         const type = e.type === "Income" ? "Inflow" : "Outflow";
@@ -191,7 +191,7 @@ export function CashFlowDashboard() {
 
     // Investments (Inflow)
     fInvestments.forEach((i) => {
-      const amt = Number(i.amount.replace(/[^\d]/g, ""));
+      const amt = parseAmount(i.amount);
       if (amt > 0) {
         const dObj = parseAppDate(i.date || "");
         const date = i.date || "01 Jun 2026";
@@ -280,7 +280,7 @@ export function CashFlowDashboard() {
 
     // Mobile Expenses & Accessory Income (Inflow / Outflow)
     mExpenses.forEach((e) => {
-      const amt = Number(e.amount.replace(/[^\d]/g, ""));
+      const amt = parseAmount(e.amount);
       if (amt > 0) {
         const dObj = parseAppDate(e.date);
         const isInflow = e.type === "Income";

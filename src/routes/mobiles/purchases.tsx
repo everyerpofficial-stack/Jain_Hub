@@ -932,7 +932,7 @@ function PurchasesPage() {
 
   const combinedSuppliersList: MobileSupplier[] = [...suppliers];
   (purchases || []).forEach((p) => {
-    if (p.supplierName && !combinedSuppliersList.some((s) => s.name.trim().toLowerCase() === p.supplierName.trim().toLowerCase() || s.id === p.supplierId)) {
+    if (p.supplierName && !combinedSuppliersList.some((s) => String(s.name || "").trim().toLowerCase() === p.supplierName.trim().toLowerCase() || s.id === p.supplierId)) {
       combinedSuppliersList.push({
         id: p.supplierId || `MS-${combinedSuppliersList.length + 1}`,
         name: p.supplierName,
@@ -1037,7 +1037,7 @@ function PurchasesPage() {
           action={<span className="text-xs text-muted-foreground">Historical records list</span>}
         />
 
-        <div className="w-full">
+        <div className="w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/10">
@@ -1061,7 +1061,7 @@ function PurchasesPage() {
               ) : (
                 sortedPurchases.map((p) => {
                   const sup = combinedSuppliersList.find(
-                    (s) => s.id === p.supplierId || s.name.trim().toLowerCase() === (p.supplierName || "").trim().toLowerCase()
+                    (s) => s.id === p.supplierId || String(s.name || "").trim().toLowerCase() === (p.supplierName || "").trim().toLowerCase()
                   );
                   const modeText = p.paymentMode ? ` (${p.paymentMode})` : "";
                   return (

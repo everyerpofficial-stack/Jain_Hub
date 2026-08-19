@@ -491,7 +491,7 @@ function AccessoriesPage() {
     if (selectedCategoryTab !== "All" && a.category !== selectedCategoryTab) return false;
     if (q) {
       const text = q.toLowerCase();
-      return [a.name, a.category, a.status].some((v) => v.toLowerCase().includes(text));
+      return [a.name, a.category, a.status].some((v) => String(v || "").toLowerCase().includes(text));
     }
     return true;
   });

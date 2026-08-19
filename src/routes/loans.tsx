@@ -4,7 +4,7 @@ import { Plus, Download, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader } from "@/components/ui-kit";
-import { downloadExcel, useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { downloadExcel, useStore, parseAppDate, parseAmount, isDateInRange } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -58,14 +58,14 @@ function LoansPage() {
 
     if (q) {
       const n = q.toLowerCase();
-      return [l.id, l.customer, l.product].some((v) => v.toLowerCase().includes(n));
+      return [l.id, l.customer, l.product].some((v) => String(v || "").toLowerCase().includes(n));
     }
     return true;
   });
 
   const outstanding = filtered
     .filter((l) => l.status === "Active" || l.status === "Overdue")
-    .reduce((sum, l) => sum + Number(l.amount.replace(/[^\d]/g, "")), 0);
+    .reduce((sum, l) => sum + parseAmount(l.amount), 0);
   const active = filtered.filter((l) => l.status === "Active").length;
 
   return (
@@ -143,14 +143,14 @@ function LoansPage() {
                 <th className="text-left font-medium py-2.5 w-[90px]">Duration</th>
                 <th className="text-left font-medium py-2.5 w-[90px]">Interest</th>
                 <th className="text-left font-medium py-2.5 px-5 w-[110px]">Status</th>
-                {currentUser?.role.toLowerCase() === "admin" && (
+                {currentUser?.role?.toLowerCase() === "admin" && (
                   <th className="text-right font-medium px-5 py-2.5 w-[80px]">Actions</th>
                 )}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={currentUser?.role.toLowerCase() === "admin" ? 10 : 9} className="px-5 py-10 text-center text-muted-foreground text-sm">No loans match these filters.</td></tr>
+                <tr><td colSpan={currentUser?.role?.toLowerCase() === "admin" ? 10 : 9} className="px-5 py-10 text-center text-muted-foreground text-sm">No loans match these filters.</td></tr>
               ) : filtered.map((l) => (
                 <tr key={l.id} className="border-t border-border hover:bg-accent/40 cursor-pointer" onClick={() => toast.message(l.id, { description: `${l.customer} · ${l.product} · ${l.amount} @ ${l.interest}` })}>
                   <td className="px-5 py-3 font-medium text-xs w-[100px] truncate">{l.id}</td>
@@ -162,7 +162,7 @@ function LoansPage() {
                   <td className="py-3 text-muted-foreground w-[90px] truncate">{l.duration}</td>
                   <td className="py-3 w-[90px] truncate">{l.interest}</td>
                   <td className="px-5 py-3 w-[110px]"><Badge tone={tone(l.status)}>{l.status}</Badge></td>
-                  {currentUser?.role.toLowerCase() === "admin" && (
+                  {currentUser?.role?.toLowerCase() === "admin" && (
                     <td className="px-5 py-3 text-right w-[80px]" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => {
@@ -191,7 +191,7 @@ function LoansPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
         {(["Active", "Overdue", "Completed", "Defaulted"] as const).map((s) => {
           const filteredByStatus = loans.filter((l) => l.status === s);
-          const total = filteredByStatus.reduce((sum, l) => sum + Number(l.amount.replace(/[^\d]/g, "")), 0);
+          const total = filteredByStatus.reduce((sum, l) => sum + parseAmount(l.amount), 0);
           const toneVal = s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Defaulted" ? "danger" : "neutral";
           return (
             <Card key={s} className="p-5 cursor-pointer hover:shadow-sm transition-shadow" onClick={() => setStatusFilter(s)}>

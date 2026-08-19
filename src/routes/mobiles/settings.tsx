@@ -76,8 +76,12 @@ function SettingsPage() {
     if (!url) { toast.error("Enter the Apps Script URL first"); return; }
     setTesting(true);
     setTestResult(null);
-    const result = await pingScript(url);
-    setTesting(false);
+    let result: { ok: boolean; error?: string };
+    try {
+      result = await pingScript(url);
+    } finally {
+      setTesting(false);
+    }
     if (result.ok) {
       setTestResult("ok");
       toast.success("✅ Connection successful! Apps Script is reachable.");
@@ -118,8 +122,12 @@ function SettingsPage() {
       return;
     }
     setSyncing(true);
-    const result = await syncToSheets();
-    setSyncing(false);
+    let result: { ok: boolean; error?: string };
+    try {
+      result = await syncToSheets();
+    } finally {
+      setSyncing(false);
+    }
     result.ok ? toast.success("All Mobiles data synced to Google Sheets ✅") : toast.error(`Sync failed: ${result.error}`);
   };
 
@@ -149,8 +157,12 @@ function SettingsPage() {
 
   const handleLoadFromSheets = async () => {
     setLoading(true);
-    const result = await loadFromSheets();
-    setLoading(false);
+    let result: { ok: boolean; error?: string };
+    try {
+      result = await loadFromSheets();
+    } finally {
+      setLoading(false);
+    }
     result.ok ? toast.success("Mobiles data loaded from Google Sheets ✅") : toast.error(`Load failed: ${result.error}`);
   };
 

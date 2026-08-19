@@ -228,7 +228,7 @@ function DocumentsPage() {
                           <Download className="size-3.5" /> Download
                         </a>
                       )}
-                      {currentUser?.role.toLowerCase() === "admin" && (
+                      {currentUser?.role?.toLowerCase() === "admin" && (
                         <button
                           onClick={() => {
                             if (confirm(`Are you sure you want to delete document ${d.fileName}?`)) {

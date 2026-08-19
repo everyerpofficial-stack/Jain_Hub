@@ -9,11 +9,15 @@ import {
 } from "@/components/ui/dialog";
 import {
   MOBILE_BRANDS, RAM_ROM_OPTIONS, INTEREST_OPTIONS, EMI_COUNT_OPTIONS,
-  REGIONS, calcEmi, useStore, formatDateToInr, formatDateToYmd,
+  REGIONS, calcEmi, calculateEmi, useStore, formatDateToInr, formatDateToYmd,
   VILLAGES_BY_REGION, type Payment, type Expense, type Investment,
 } from "@/lib/store";
 
-type DialogKey = null | "customer" | "loan" | "expense" | "investment" | "payment" | "report" | "collect";
+// Every key here MUST have a matching dialog rendered in <AppDialogs/> below.
+// "report" used to sit in this union with no component behind it, which is
+// how openDialog("loan") became a button that opened nothing — keep the two
+// lists in step so wiring a key with no dialog fails to compile.
+type DialogKey = null | "customer" | "loan" | "expense" | "investment" | "payment" | "collect";
 
 type UiState = {
   open: DialogKey;
@@ -739,10 +743,121 @@ function InvestmentDialog() {
   );
 }
 
+// The "loan" dialog key existed and /loans wired its "New Loan" button to
+// openDialog("loan") — but no component ever rendered for that key, so the
+// button set the store flag and nothing appeared. This is that missing dialog.
+function LoanDialog() {
+  const { open, close } = useUi();
+  const addLoan = useStore((s) => s.addLoan);
+  const customers = useStore((s) => s.customers);
+
+  const [customer, setCustomer] = useState("");
+  const [product, setProduct] = useState("");
+  const [amount, setAmount] = useState("");
+  const [deposit, setDeposit] = useState("");
+  const [interest, setInterest] = useState(INTEREST_OPTIONS[1] ?? "2");
+  const [months, setMonths] = useState("12");
+
+  useEffect(() => {
+    if (open !== "loan") {
+      setCustomer("");
+      setProduct("");
+      setAmount("");
+      setDeposit("");
+      setInterest(INTEREST_OPTIONS[1] ?? "2");
+      setMonths("12");
+    }
+  }, [open]);
+
+  const amountNum = Number(amount) || 0;
+  const depositNum = Number(deposit) || 0;
+  const principal = Math.max(0, amountNum - depositNum);
+  const previewEmi = principal > 0 ? Math.round(calculateEmi(principal, Number(interest) || 0, Number(months) || 0)) : 0;
+
+  const depositExceedsAmount = depositNum > amountNum && amountNum > 0;
+  const canSubmit =
+    !!customer.trim() && !!product.trim() && amountNum > 0 && depositNum >= 0 && !depositExceedsAmount;
+
+  const customerNames = customers.map((c) => c.name).filter(Boolean);
+
+  return (
+    <Dialog open={open === "loan"} onOpenChange={(o) => !o && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New loan</DialogTitle>
+          <DialogDescription>Register a financed handset against a customer.</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="col-span-2">
+            {customerNames.length > 0 ? (
+              <Select
+                label="Customer"
+                value={customer}
+                onChange={setCustomer}
+                options={["", ...customerNames]}
+              />
+            ) : (
+              <Field label="Customer" value={customer} onChange={setCustomer} placeholder="Customer name" />
+            )}
+          </div>
+          <div className="col-span-2">
+            <Field label="Product" value={product} onChange={setProduct} placeholder="e.g. Redmi Note 13 5G" />
+          </div>
+          <Field label="Loan amount (₹)" value={amount} onChange={setAmount} type="number" inputMode="numeric" placeholder="15000" highlight />
+          <Field label="Deposit (₹)" value={deposit} onChange={setDeposit} type="number" inputMode="numeric" placeholder="3000" />
+          <Select label="Interest (%)" value={interest} onChange={setInterest} options={INTEREST_OPTIONS} />
+          <Select label="Duration (months)" value={months} onChange={setMonths} options={EMI_COUNT_OPTIONS} />
+        </div>
+
+        {depositExceedsAmount && (
+          <p className="text-xs text-danger font-medium -mt-1">
+            Deposit cannot be more than the loan amount.
+          </p>
+        )}
+
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm flex items-center justify-between">
+          <span className="text-muted-foreground text-xs font-medium">Financed / Monthly EMI</span>
+          <span className="font-semibold">
+            ₹{principal.toLocaleString("en-IN")} · ₹{previewEmi.toLocaleString("en-IN")}/mo
+          </span>
+        </div>
+
+        <DialogFooter>
+          <GhostBtn onClick={close}>Cancel</GhostBtn>
+          <PrimaryBtn
+            disabled={!canSubmit}
+            onClick={() => {
+              try {
+                const l = addLoan({
+                  customer: customer.trim(),
+                  product: product.trim(),
+                  amount: amountNum,
+                  deposit: depositNum,
+                  interest: Number(interest) || 0,
+                  months: Number(months) || 12,
+                });
+                toast.success(`Loan ${l.id} created for ${l.customer}`);
+                close();
+              } catch (err) {
+                toast.error("Could not create loan", {
+                  description: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }}
+          >
+            Save
+          </PrimaryBtn>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function AppDialogs() {
   return (
     <>
       <CustomerDialog />
+      <LoanDialog />
       <CollectDialog />
       <ExpenseDialog />
       <InvestmentDialog />

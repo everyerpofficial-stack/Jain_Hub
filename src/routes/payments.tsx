@@ -4,7 +4,7 @@ import { Download, Printer, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, StatCard } from "@/components/ui-kit";
-import { downloadExcel, useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { downloadExcel, useStore, parseAppDate, parseAmount, isDateInRange } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
 export const Route = createFileRoute("/payments")({
@@ -54,18 +54,18 @@ function PaymentsPage() {
 
   const totalCollected = payments
     .filter((p) => p.status === "Success")
-    .reduce((sum, p) => sum + Number(p.amount.replace(/[^\d]/g, "")), 0);
+    .reduce((sum, p) => sum + parseAmount(p.amount), 0);
 
   const filteredTotal = filtered
     .filter((p) => p.status === "Success")
-    .reduce((sum, p) => sum + Number(p.amount.replace(/[^\d]/g, "")), 0);
+    .reduce((sum, p) => sum + parseAmount(p.amount), 0);
 
   const methodsPresent = Array.from(new Set(["Cash", "UPI", ...payments.map((p) => p.method)]));
   const byMethod = methodsPresent.map((m) => ({
     method: m,
     count: filtered.filter((p) => p.method === m && p.status === "Success").length,
     amount: filtered.filter((p) => p.method === m && p.status === "Success")
-      .reduce((s, p) => s + Number(p.amount.replace(/[^\d]/g, "")), 0),
+      .reduce((s, p) => s + parseAmount(p.amount), 0),
   }));
 
   return (
@@ -168,14 +168,14 @@ function PaymentsPage() {
                 <th className="text-right font-medium px-4 py-2.5 w-[120px]">Amount paid</th>
                 <th className="text-right font-medium px-4 py-2.5 w-[120px]">Pending</th>
                 <th className="text-left font-medium px-5 py-2.5 w-[110px]">Status</th>
-                {currentUser?.role.toLowerCase() === "admin" && (
+                {currentUser?.role?.toLowerCase() === "admin" && (
                   <th className="text-right font-medium px-5 py-2.5 w-[80px] print:hidden">Actions</th>
                 )}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={currentUser?.role.toLowerCase() === "admin" ? 9 : 8} className="px-5 py-10 text-center text-muted-foreground">No payments match.</td></tr>
+                <tr><td colSpan={currentUser?.role?.toLowerCase() === "admin" ? 9 : 8} className="px-5 py-10 text-center text-muted-foreground">No payments match.</td></tr>
               ) : filtered.map((p) => (
                 <tr key={p.id} className="border-t border-border hover:bg-accent/40">
                   <td className="px-5 py-3 font-medium text-xs w-[100px] truncate">{p.id}</td>
@@ -186,7 +186,7 @@ function PaymentsPage() {
                   <td className="px-4 py-3 text-right font-medium w-[120px] truncate">{p.amount}</td>
                   <td className="px-4 py-3 text-right text-muted-foreground w-[120px] truncate">{p.pending}</td>
                   <td className="px-5 py-3 w-[110px]"><Badge tone={p.status === "Success" ? "success" : "danger"}>{p.status}</Badge></td>
-                  {currentUser?.role.toLowerCase() === "admin" && (
+                  {currentUser?.role?.toLowerCase() === "admin" && (
                     <td className="px-5 py-3 text-right w-[80px] print:hidden">
                       <button
                         onClick={() => {

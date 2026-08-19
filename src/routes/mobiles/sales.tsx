@@ -557,7 +557,7 @@ function SalesPage() {
               action={<span className="text-xs text-muted-foreground">Click print icon to reprint original receipt</span>}
             />
 
-        <div className="w-full">
+        <div className="w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/10">

@@ -341,7 +341,7 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                           <Printer className="size-3" /> Print
                         </button>
                       )}
-                      {currentUser?.role.toLowerCase() === "admin" && (
+                      {currentUser?.role?.toLowerCase() === "admin" && (
                         <button
                           onClick={() => {
                             if (confirm(`Are you sure you want to delete document ${doc.fileName}?`)) {
@@ -406,7 +406,7 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
 
         {/* Footer */}
         <div className="p-4 border-t border-border bg-surface flex justify-between gap-2">
-          {currentUser?.role.toLowerCase() === "admin" && (
+          {currentUser?.role?.toLowerCase() === "admin" && (
             <button
               onClick={() => {
                 if (confirm(`Are you sure you want to delete ${customer.name}? This will also delete all associated loans, payments, and documents.`)) {
@@ -704,7 +704,7 @@ function CustomersPage() {
                       >
                         <Phone className="size-3.5" />
                       </button>
-                      {currentUser?.role.toLowerCase() === "admin" && (
+                      {currentUser?.role?.toLowerCase() === "admin" && (
                         <button
                           title="Delete customer"
                           onClick={() => {

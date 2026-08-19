@@ -45,11 +45,11 @@ function MobileAuditPage() {
   const users = ["All users", ...Array.from(new Set(all.map((l) => l.user)))];
 
   const filtered = all.filter((l) => {
-    if (actionFilter !== "All actions" && !l.action.toLowerCase().includes(actionFilter.toLowerCase())) return false;
+    if (actionFilter !== "All actions" && !String(l.action || "").toLowerCase().includes(actionFilter.toLowerCase())) return false;
     if (userFilter !== "All users" && l.user !== userFilter) return false;
     if (q) {
       const n = q.toLowerCase();
-      return [l.user, l.action, l.target].some((v) => v.toLowerCase().includes(n));
+      return [l.user, l.action, l.target].some((v) => String(v || "").toLowerCase().includes(n));
     }
     return true;
   });

@@ -4,7 +4,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, ProgressBar, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useStore, parseAppDate, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
+import { useStore, parseAppDate, parseAmount, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -58,21 +58,21 @@ function ExpensesPage() {
   const isIncome = (e: any) => e.type === "Income";
 
   // Period sums
-  const totalIncome = filteredEntries.filter(isIncome).reduce((sum, e) => sum + Number(e.amount.replace(/[^\d]/g, "")), 0);
-  const totalExpenses = filteredEntries.filter(e => !isIncome(e)).reduce((sum, e) => sum + Number(e.amount.replace(/[^\d]/g, "")), 0);
+  const totalIncome = filteredEntries.filter(isIncome).reduce((sum, e) => sum + parseAmount(e.amount), 0);
+  const totalExpenses = filteredEntries.filter(e => !isIncome(e)).reduce((sum, e) => sum + parseAmount(e.amount), 0);
   const netBalance = totalIncome - totalExpenses;
 
   // Breakdown by category
   const incomeByCat = Object.entries(
     filteredEntries.filter(isIncome).reduce<Record<string, number>>((acc, e) => {
-      acc[e.cat] = (acc[e.cat] || 0) + Number(e.amount.replace(/[^\d]/g, ""));
+      acc[e.cat] = (acc[e.cat] || 0) + parseAmount(e.amount);
       return acc;
     }, {})
   ).sort((a, b) => b[1] - a[1]);
 
   const expenseByCat = Object.entries(
     filteredEntries.filter(e => !isIncome(e)).reduce<Record<string, number>>((acc, e) => {
-      acc[e.cat] = (acc[e.cat] || 0) + Number(e.amount.replace(/[^\d]/g, ""));
+      acc[e.cat] = (acc[e.cat] || 0) + parseAmount(e.amount);
       return acc;
     }, {})
   ).sort((a, b) => b[1] - a[1]);
@@ -90,19 +90,19 @@ function ExpensesPage() {
 
       const monthIncome = expenses
         .filter((e) => {
-          const dateLower = e.date.toLowerCase();
+          const dateLower = String(e.date || "").toLowerCase();
           const pDate = parseAppDate(e.date);
           return isIncome(e) && dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
         })
-        .reduce((sum, e) => sum + Number(e.amount.replace(/[^\d]/g, "")), 0);
+        .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 
       const monthExpense = expenses
         .filter((e) => {
-          const dateLower = e.date.toLowerCase();
+          const dateLower = String(e.date || "").toLowerCase();
           const pDate = parseAppDate(e.date);
           return !isIncome(e) && dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
         })
-        .reduce((sum, e) => sum + Number(e.amount.replace(/[^\d]/g, "")), 0);
+        .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 
       data.push({
         m: monthLabel,
@@ -117,19 +117,19 @@ function ExpensesPage() {
   const yearStr = referenceYear.toString();
   const ytdIncome = expenses
     .filter((e) => {
-      const dateLower = e.date.toLowerCase();
+      const dateLower = String(e.date || "").toLowerCase();
       const pDate = parseAppDate(e.date);
       return isIncome(e) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
     })
-    .reduce((sum, e) => sum + Number(e.amount.replace(/[^\d]/g, "")), 0);
+    .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 
   const ytdExpenses = expenses
     .filter((e) => {
-      const dateLower = e.date.toLowerCase();
+      const dateLower = String(e.date || "").toLowerCase();
       const pDate = parseAppDate(e.date);
       return !isIncome(e) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
     })
-    .reduce((sum, e) => sum + Number(e.amount.replace(/[^\d]/g, "")), 0);
+    .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 
   const ytdNet = ytdIncome - ytdExpenses;
   const ytdNetStr = `${ytdNet >= 0 ? "+" : "-"}₹${Math.abs(ytdNet) >= 100000 
@@ -282,60 +282,62 @@ function ExpensesPage() {
 
       <Card className="mt-6">
         <SectionHeader title="Recent entries" action={<span className="text-xs text-muted-foreground">All transactions</span>} />
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              <th className="text-left font-medium px-5 py-2.5">Reference</th>
-              <th className="text-left font-medium px-4 py-2.5">Date</th>
-              <th className="text-left font-medium px-4 py-2.5">Type</th>
-              <th className="text-left font-medium px-4 py-2.5">Category</th>
-              <th className="text-left font-medium px-4 py-2.5">Description</th>
-              <th className="text-right font-medium px-5 py-2.5">Amount</th>
-              {currentUser?.role.toLowerCase() === "admin" && (
-                <th className="text-right font-medium px-5 py-2.5">Actions</th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEntries.length === 0 ? (
-              <tr><td colSpan={currentUser?.role.toLowerCase() === "admin" ? 7 : 6} className="px-5 py-10 text-center text-muted-foreground">No entries match these filters.</td></tr>
-            ) : filteredEntries.map((e) => {
-              const entryIsIncome = isIncome(e);
-              return (
-                <tr key={e.id} className="border-t border-border">
-                  <td className="px-5 py-3 font-medium">{e.id}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{e.date}</td>
-                  <td className="px-4 py-3">
-                    <Badge tone={entryIsIncome ? "success" : "neutral"}>
-                      {entryIsIncome ? "Income" : "Expense"}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">{e.cat}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{e.desc}</td>
-                  <td className={`px-5 py-3 text-right font-semibold ${entryIsIncome ? "text-success font-bold" : "text-foreground"}`}>
-                    {entryIsIncome ? `+ ₹${Number(e.amount.replace(/[^\d]/g, "")).toLocaleString("en-IN")}` : `- ₹${Number(e.amount.replace(/[^\d]/g, "")).toLocaleString("en-IN")}`}
-                  </td>
-                  {currentUser?.role.toLowerCase() === "admin" && (
-                    <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => {
-                          if (confirm(`Are you sure you want to delete entry ${e.id} for ${e.amount}?`)) {
-                            deleteExpense(e.id);
-                            toast.success(`Deleted ledger entry ${e.id}`);
-                          }
-                        }}
-                        className="size-7 rounded border border-border inline-flex items-center justify-center hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-colors text-muted-foreground"
-                        title="Delete Entry"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                <th className="text-left font-medium px-5 py-2.5">Reference</th>
+                <th className="text-left font-medium px-4 py-2.5">Date</th>
+                <th className="text-left font-medium px-4 py-2.5">Type</th>
+                <th className="text-left font-medium px-4 py-2.5">Category</th>
+                <th className="text-left font-medium px-4 py-2.5">Description</th>
+                <th className="text-right font-medium px-5 py-2.5">Amount</th>
+                {currentUser?.role?.toLowerCase() === "admin" && (
+                  <th className="text-right font-medium px-5 py-2.5">Actions</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredEntries.length === 0 ? (
+                <tr><td colSpan={currentUser?.role?.toLowerCase() === "admin" ? 7 : 6} className="px-5 py-10 text-center text-muted-foreground">No entries match these filters.</td></tr>
+              ) : filteredEntries.map((e) => {
+                const entryIsIncome = isIncome(e);
+                return (
+                  <tr key={e.id} className="border-t border-border">
+                    <td className="px-5 py-3 font-medium">{e.id}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{e.date}</td>
+                    <td className="px-4 py-3">
+                      <Badge tone={entryIsIncome ? "success" : "neutral"}>
+                        {entryIsIncome ? "Income" : "Expense"}
+                      </Badge>
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td className="px-4 py-3">{e.cat}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{e.desc}</td>
+                    <td className={`px-5 py-3 text-right font-semibold ${entryIsIncome ? "text-success font-bold" : "text-foreground"}`}>
+                      {entryIsIncome ? `+ ₹${parseAmount(e.amount).toLocaleString("en-IN")}` : `- ₹${parseAmount(e.amount).toLocaleString("en-IN")}`}
+                    </td>
+                    {currentUser?.role?.toLowerCase() === "admin" && (
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete entry ${e.id} for ${e.amount}?`)) {
+                              deleteExpense(e.id);
+                              toast.success(`Deleted ledger entry ${e.id}`);
+                            }
+                          }}
+                          className="size-7 rounded border border-border inline-flex items-center justify-center hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-colors text-muted-foreground"
+                          title="Delete Entry"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </AppShell>
   );

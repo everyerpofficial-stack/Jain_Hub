@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { formatDateToInr } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
+import { enqueueWrite } from "./syncQueue";
 
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   "TV": [
@@ -448,13 +449,15 @@ function warrantyRow(w: MobileWarrantyClaim): SheetRow {
 function syncUpsert(get: () => MobilesState, sheet: SheetName, row: SheetRow, label: string) {
   const { sheetsConfig } = get();
   if (sheetsConfig.enabled && sheetsConfig.url) {
-    upsertRow(sheetsConfig.url, sheet, row).catch((err) => console.warn(`[MobileStore] Immediate ${label} sync failed:`, err));
+    const url = sheetsConfig.url;
+    void enqueueWrite(sheet, label, () => upsertRow(url, sheet, row));
   }
 }
 function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label: string) {
   const { sheetsConfig } = get();
   if (sheetsConfig.enabled && sheetsConfig.url) {
-    deleteRow(sheetsConfig.url, sheet, id).catch((err) => console.warn(`[MobileStore] Immediate ${label} sync failed:`, err));
+    const url = sheetsConfig.url;
+    void enqueueWrite(sheet, label, () => deleteRow(url, sheet, id));
   }
 }
 

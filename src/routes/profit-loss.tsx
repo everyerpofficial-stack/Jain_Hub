@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown, Download } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Card, SectionHeader } from "@/components/ui-kit";
-import { downloadExcel, useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { downloadExcel, useStore, parseAppDate, parseAmount, isDateInRange } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
 export const Route = createFileRoute("/profit-loss")({
@@ -92,16 +92,16 @@ function ProfitLossPage() {
   const grossProfit = totalFileCharge + totalInterestIncome;
 
   // ---- Expenses ----
-  const totalExpenses = filteredExpenses.reduce((s, e) => s + Number(String(e.amount || 0).replace(/[^\d]/g, "")), 0);
+  const totalExpenses = filteredExpenses.reduce((s, e) => s + parseAmount(e.amount), 0);
   const netProfit = grossProfit - totalExpenses;
 
   // ---- Investment ----
-  const totalInvestment = filteredInvestments.reduce((s, i) => s + Number(String(i.amount || 0).replace(/[^\d]/g, "")), 0);
+  const totalInvestment = filteredInvestments.reduce((s, i) => s + parseAmount(i.amount), 0);
   const balanceForEmi   = filteredCustomers.reduce((s, c) => s + (c.balanceForEmi || 0), 0);
 
   // ---- By category ----
   const expByCategory = filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-    acc[e.cat] = (acc[e.cat] || 0) + Number(String(e.amount || 0).replace(/[^\d]/g, ""));
+    acc[e.cat] = (acc[e.cat] || 0) + parseAmount(e.amount);
     return acc;
   }, {});
 
@@ -147,7 +147,7 @@ function ProfitLossPage() {
           const pDate = parseAppDate(e.date);
           return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
         })
-        .reduce((sum, e) => sum + Number(String(e.amount || 0).replace(/[^\d]/g, "")), 0);
+        .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 
       data.push({
         month: `${monthLabel} ${yearStr}`,
@@ -254,28 +254,30 @@ function ProfitLossPage() {
       {/* Monthly trend table */}
       <Card className="mt-6">
         <SectionHeader title="Monthly Profit Trend" />
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
-              <th className="text-left font-medium px-5 py-2.5">Month</th>
-              <th className="text-right font-medium px-4 py-2.5">Revenue</th>
-              <th className="text-right font-medium px-4 py-2.5">Expenses</th>
-              <th className="text-right font-medium px-5 py-2.5">Net Profit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {monthlyData.map((row) => (
-              <tr key={row.month} className="border-t border-border hover:bg-accent/30">
-                <td className="px-5 py-3 font-medium">{row.month}</td>
-                <td className="px-4 py-3 text-right">₹{row.revenue.toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3 text-right text-danger">₹{row.expense.toLocaleString("en-IN")}</td>
-                <td className="px-5 py-3 text-right font-semibold text-success">
-                  {row.profit >= 0 ? "+" : "−"}₹{Math.abs(row.profit).toLocaleString("en-IN")}
-                </td>
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                <th className="text-left font-medium px-5 py-2.5">Month</th>
+                <th className="text-right font-medium px-4 py-2.5">Revenue</th>
+                <th className="text-right font-medium px-4 py-2.5">Expenses</th>
+                <th className="text-right font-medium px-5 py-2.5">Net Profit</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {monthlyData.map((row) => (
+                <tr key={row.month} className="border-t border-border hover:bg-accent/30">
+                  <td className="px-5 py-3 font-medium">{row.month}</td>
+                  <td className="px-4 py-3 text-right">₹{row.revenue.toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-3 text-right text-danger">₹{row.expense.toLocaleString("en-IN")}</td>
+                  <td className="px-5 py-3 text-right font-semibold text-success">
+                    {row.profit >= 0 ? "+" : "−"}₹{Math.abs(row.profit).toLocaleString("en-IN")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </AppShell>
   );

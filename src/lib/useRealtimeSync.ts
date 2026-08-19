@@ -14,6 +14,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "./store";
 import { useMobileStore } from "./mobileStore";
 import { digestSheets, readSheet } from "./googleSheets";
+import { isSheetBusy } from "./syncQueue";
 import { toast } from "sonner";
 
 /** Poll interval in milliseconds (20 seconds — responsive yet quota-safe) */
@@ -89,17 +90,26 @@ export function useRealtimeSync() {
           (k) => k.startsWith("Mobiles_") && String(digest[k]) !== String(prev[k] ?? "")
         );
 
-        lastDigestRef.current = digest;
+        lastDigestRef.current = { ...digest };
 
         // Step 2: Fetch only changed sheets
+        const deferred: string[] = [];
         if (changedFinance.length > 0) {
-          await reconcileFinance(activeUrl, changedFinance);
+          deferred.push(...await reconcileFinance(activeUrl, changedFinance));
         }
         if (changedMobiles.length > 0) {
-          await reconcileMobiles(activeUrl, changedMobiles);
+          deferred.push(...await reconcileMobiles(activeUrl, changedMobiles));
         }
 
-        if (changedFinance.length > 0 || changedMobiles.length > 0) {
+        // A sheet we skipped (local write still in flight) has NOT been
+        // reconciled, so drop its fingerprint — otherwise it now matches the
+        // recorded digest and would never be seen as "changed" again, leaving
+        // that sheet permanently un-synced for the rest of the session.
+        for (const sheet of deferred) delete lastDigestRef.current[sheet];
+
+        const reconciledAny =
+          changedFinance.length + changedMobiles.length - deferred.length > 0;
+        if (reconciledAny) {
           useStore.getState().updateSheetsConfig({ lastSync: new Date().toLocaleTimeString("en-IN") });
         }
 
@@ -140,8 +150,13 @@ export function useRealtimeSync() {
 // ── Finance reconciliation ──────────────────────────────────────────────────
 // Full-replace strategy: when digest changes for a sheet, we replace local data
 // with sheet data. This ensures EDITS (not just adds/deletes) propagate.
-async function reconcileFinance(url: string, sheets: string[]) {
+async function reconcileFinance(url: string, sheets: string[]): Promise<string[]> {
+  const deferred: string[] = [];
   for (const sheet of sheets) {
+    // A row we just wrote locally may not be readable back from the sheet
+    // yet. Reconciling now would see it as "missing upstream" and wipe it
+    // from local state. Leave this sheet for the next poll.
+    if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
       const rows = await readSheet(url, sheet as import("./googleSheets").SheetName);
 
@@ -264,15 +279,23 @@ async function reconcileFinance(url: string, sheets: string[]) {
         }
       }
     } catch (err) {
+      // A read that failed leaves local state untouched, so treat it like a
+      // deferral: forget the fingerprint and retry on the next poll.
+      deferred.push(sheet);
       console.warn(`[RealtimeSync] Failed to reconcile ${sheet}:`, err);
     }
   }
+  return deferred;
 }
 
 // ── Mobiles reconciliation ──────────────────────────────────────────────────
 // Full-replace strategy: replace local with sheets data when digest changes.
-async function reconcileMobiles(url: string, sheets: string[]) {
+async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]> {
+  const deferred: string[] = [];
   for (const sheet of sheets) {
+    // See reconcileFinance — don't let a poll overwrite a local record whose
+    // write to the sheet is still in flight.
+    if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
       const rawRows = await readSheet(url, sheet as import("./googleSheets").SheetName);
       
@@ -364,8 +387,10 @@ async function reconcileMobiles(url: string, sheets: string[]) {
       if (sheet === "Mobiles_WarrantyClaims")   fullReplace(store.warranties || [], set, "warranties");
 
     } catch (err) {
+      deferred.push(sheet);
       console.warn(`[RealtimeSync] Failed to reconcile ${sheet}:`, err);
     }
   }
+  return deferred;
 }
 

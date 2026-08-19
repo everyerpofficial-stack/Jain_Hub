@@ -65,8 +65,8 @@ function RolesPage() {
 
   // Dynamic user counters
   const totalStaff = staff.length;
-  const adminCount = staff.filter((s) => s.role.toLowerCase() === "admin").length;
-  const staffCount = staff.filter((s) => s.role.toLowerCase() === "staff").length;
+  const adminCount = staff.filter((s) => String(s.role || "").toLowerCase() === "admin").length;
+  const staffCount = staff.filter((s) => String(s.role || "").toLowerCase() === "staff").length;
 
   const handleManualRefresh = async () => {
     setIsSyncing(true);
@@ -275,7 +275,7 @@ function RolesPage() {
                   // always a guaranteed way back in even if every other
                   // staff record is misconfigured or removed.
                   const isFixedAdmin = member.id === "ST-001";
-                  const initials = member.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+                  const initials = String(member.name || "").split(" ").filter(Boolean).map(n => n[0]).join("").toUpperCase().slice(0, 2) || "?";
                   return (
                     <tr key={member.id} className="border-t border-border hover:bg-accent/20 transition-colors">
                       <td className="px-5 py-3">

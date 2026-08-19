@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import {
   Users, TrendingUp, IndianRupee,
@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, ProgressBar, SectionHeader, StatCard } from "@/components/ui-kit";
-import { downloadExcel, useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { downloadExcel, useStore, parseAppDate, parseAmount, isDateInRange } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
@@ -27,6 +27,7 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const { openDialog } = useUi();
+  const currentUser = useStore((s) => s.currentUser);
   const customers = useStore((s) => s.customers);
   const payments = useStore((s) => s.payments);
   const expenses = useStore((s) => s.expenses);
@@ -80,7 +81,7 @@ function Dashboard() {
             const pDate = parseAppDate(p.date);
             return pDate && pDate.toDateString() === dayDate.toDateString() && p.status === "Success";
           })
-          .reduce((sum, p) => sum + Number(p.amount.replace(/[^\d]/g, "")), 0);
+          .reduce((sum, p) => sum + parseAmount(p.amount), 0);
           
         const pending = customers
           .filter((c) => {
@@ -111,7 +112,7 @@ function Dashboard() {
             if (!pDate) return false;
             return pDate >= monthStart && pDate <= monthEnd && p.status === "Success" && isDateInRange(pDate, startDate, endDate);
           })
-          .reduce((sum, p) => sum + Number(p.amount.replace(/[^\d]/g, "")), 0);
+          .reduce((sum, p) => sum + parseAmount(p.amount), 0);
           
         const pending = customers
           .filter((c) => {
@@ -143,7 +144,7 @@ function Dashboard() {
       
       const paymentsInPeriod = payments
         .filter(p => p.customerId === c.id && p.status === "Success" && isDateInRange(parseAppDate(p.date), startDate, endDate))
-        .reduce((sum, p) => sum + Number(p.amount.replace(/[^\d]/g, "")), 0);
+        .reduce((sum, p) => sum + parseAmount(p.amount), 0);
         
       brandMap[brand].collected += downpayment + paymentsInPeriod;
     });
@@ -210,17 +211,17 @@ function Dashboard() {
     }, 0);
   
   const grossProfit       = totalFileCharge + collectedInterest;
-  const totalExpenses     = filteredExpenses.reduce((s, e) => s + Number(String(e.amount || 0).replace(/[^\d]/g, "")), 0);
+  const totalExpenses     = filteredExpenses.reduce((s, e) => s + parseAmount(e.amount), 0);
   const netProfit         = grossProfit - totalExpenses;
   const totalInvestment   = investments.filter((i) => {
     if (filterPreset === "all") return true;
     return isDateInRange(parseAppDate(i.maturity), startDate, endDate);
-  }).reduce((s, i) => s + Number(String(i.amount || 0).replace(/[^\d]/g, "")), 0);
+  }).reduce((s, i) => s + parseAmount(i.amount), 0);
 
   const periodPaymentCount = filteredPayments.length;
   const periodCollection  = filteredPayments
     .filter((p) => p.status === "Success")
-    .reduce((s, p) => s + Number(String(p.amount || 0).replace(/[^\d]/g, "")), 0);
+    .reduce((s, p) => s + parseAmount(p.amount), 0);
 
   const fmt = (n?: number) => "₹" + Math.round(n || 0).toLocaleString("en-IN");
 
@@ -230,7 +231,7 @@ function Dashboard() {
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <div>
           <h1 className="text-[26px] font-semibold tracking-tight leading-tight">
-            {greeting}, Rajesh
+            {greeting}{currentUser?.name ? `, ${currentUser.name.split(" ")[0]}` : ""}
           </h1>
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
             {dateStr} · Jain Finance Mobile EMI

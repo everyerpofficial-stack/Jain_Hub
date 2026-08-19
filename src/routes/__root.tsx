@@ -40,7 +40,7 @@ function reloadOnceForChunkError(): boolean {
   return true;
 }
 
-function NotFoundComponent() {
+export function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -62,7 +62,7 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+export function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
   const chunkError = isChunkLoadError(error);

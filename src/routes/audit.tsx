@@ -46,11 +46,11 @@ function AuditPage() {
   const users = ["All users", ...Array.from(new Set(all.map((l) => l.user)))];
 
   const filtered = all.filter((l) => {
-    if (actionFilter !== "All actions" && !l.action.toLowerCase().includes(actionFilter.toLowerCase())) return false;
+    if (actionFilter !== "All actions" && !String(l.action || "").toLowerCase().includes(actionFilter.toLowerCase())) return false;
     if (userFilter !== "All users" && l.user !== userFilter) return false;
     if (q) {
       const n = q.toLowerCase();
-      return [l.user, l.action, l.target].some((v) => v.toLowerCase().includes(n));
+      return [l.user, l.action, l.target].some((v) => String(v || "").toLowerCase().includes(n));
     }
     return true;
   });
@@ -116,28 +116,30 @@ function AuditPage() {
         </div>
 
         <SectionHeader title="Activity" action={<span className="text-xs text-muted-foreground">{filtered.length} entries</span>} />
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              <th className="text-left font-medium px-5 py-2.5">Timestamp</th>
-              <th className="text-left font-medium py-2.5">User</th>
-              <th className="text-left font-medium py-2.5">Action</th>
-              <th className="text-left font-medium px-5 py-2.5">Target</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={4} className="px-5 py-10 text-center text-muted-foreground text-sm">No audit entries match.</td></tr>
-            ) : filtered.map((l, i) => (
-              <tr key={i} className="border-t border-border hover:bg-accent/30">
-                <td className="px-5 py-3 text-muted-foreground font-mono text-[12px]">{l.ts}</td>
-                <td className="py-3 font-medium">{l.user}</td>
-                <td className="py-3">{l.action}</td>
-                <td className="px-5 py-3 text-muted-foreground">{l.target}</td>
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                <th className="text-left font-medium px-5 py-2.5">Timestamp</th>
+                <th className="text-left font-medium py-2.5">User</th>
+                <th className="text-left font-medium py-2.5">Action</th>
+                <th className="text-left font-medium px-5 py-2.5">Target</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={4} className="px-5 py-10 text-center text-muted-foreground text-sm">No audit entries match.</td></tr>
+              ) : filtered.map((l, i) => (
+                <tr key={i} className="border-t border-border hover:bg-accent/30">
+                  <td className="px-5 py-3 text-muted-foreground font-mono text-[12px]">{l.ts}</td>
+                  <td className="py-3 font-medium">{l.user}</td>
+                  <td className="py-3">{l.action}</td>
+                  <td className="px-5 py-3 text-muted-foreground">{l.target}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </AppShell>
   );

@@ -196,7 +196,7 @@ function InvestmentsPage() {
 
       <Card className="mt-6 w-full overflow-hidden">
         <SectionHeader title="Active investments" />
-        <div className="w-full">
+        <div className="w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/10">
@@ -249,7 +249,7 @@ function InvestmentsPage() {
 
       <Card className="mt-6 w-full overflow-hidden">
         <SectionHeader title="Capital Deployment (Financed Customers)" action={<span className="text-xs text-muted-foreground">{filteredCustomers.length} active customer loans</span>} />
-        <div className="w-full">
+        <div className="w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/10">

@@ -6,6 +6,7 @@ import { persist } from "zustand/middleware";
 import XLSX from "xlsx-js-style";
 import { toast } from "sonner";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
+import { enqueueWrite } from "./syncQueue";
 import { nextSeqId } from "./utils";
 
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";
@@ -635,13 +636,15 @@ function staffRow(s: Staff): SheetRow {
 function syncUpsert(get: () => State, sheet: SheetName, row: SheetRow, label: string) {
   const { sheetsConfig } = get();
   if (sheetsConfig.enabled && sheetsConfig.url) {
-    upsertRow(sheetsConfig.url, sheet, row).catch((err) => console.warn(`[Store] Immediate ${label} sync failed:`, err));
+    const url = sheetsConfig.url;
+    void enqueueWrite(sheet, label, () => upsertRow(url, sheet, row));
   }
 }
 function syncDelete(get: () => State, sheet: SheetName, id: string, label: string) {
   const { sheetsConfig } = get();
   if (sheetsConfig.enabled && sheetsConfig.url) {
-    deleteRow(sheetsConfig.url, sheet, id).catch((err) => console.warn(`[Store] Immediate ${label} sync failed:`, err));
+    const url = sheetsConfig.url;
+    void enqueueWrite(sheet, label, () => deleteRow(url, sheet, id));
   }
 }
 
@@ -926,7 +929,7 @@ export const useStore = create<State>()(
                       pendingEmis: newPending,
                       pendingAmount: newPendingAmt,
                       lastPaymentDate: lastP ? lastP.date : "—",
-                      lastPaymentAmt: lastP ? Number(lastP.amount.replace(/[^\d]/g, "")) : 0,
+                      lastPaymentAmt: lastP ? parseAmount(lastP.amount) : 0,
                       status: newPending === 0 ? "Closed" : "Active",
                       emiDate: prevEmiDate,
                       due: prevEmiDate
@@ -1401,7 +1404,7 @@ export const useStore = create<State>()(
         if (customerId) {
           get().recordPayment({
             customerId,
-            amount: Number(c.amount.replace(/[^\d]/g, "")),
+            amount: parseAmount(c.amount),
             method: method === "—" ? "Cash" : method,
             collector: c.collector,
             remarks: "Collected from due list",
@@ -2088,6 +2091,27 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
   toast.success(`${title} PDF ready for print/download`);
 }
 
+// ---- Shared Amount Utility ----
+/**
+ * Coerce any stored money value into a plain number.
+ *
+ * Amounts are typed `string` on our entities, but rows reconciled from Google
+ * Sheets are cast straight into state (`rows as any[]`), so a blank cell or a
+ * column missing from the sheet lands here as `undefined`/`null`/a raw number.
+ * Call sites used to do `x.amount.replace(/[^\d]/g, "")` directly, which threw
+ * "Cannot read properties of undefined (reading 'replace')" and took down the
+ * whole page. Always route money through this instead of touching `.replace`.
+ */
+export function parseAmount(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (value === null || value === undefined) return 0;
+  // Keep digits, minus and decimal point so "-₹1,234.50" survives intact.
+  const cleaned = String(value).replace(/[^\d.-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === ".") return 0;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // ---- Shared Date Utilities ----
 export function parseAppDate(dateStr: string | null | undefined): Date | null {
   if (!dateStr || typeof dateStr !== "string") return null;
@@ -2095,8 +2119,14 @@ export function parseAppDate(dateStr: string | null | undefined): Date | null {
   if (!cleaned) return null;
   
   // Format: YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-    const d = new Date(cleaned);
+  // Built from parts rather than `new Date(cleaned)`: the string form is
+  // parsed as UTC midnight, which resolves to the PREVIOUS day in any
+  // negative-offset timezone. Every other branch below already builds a
+  // local date, so this one was the odd one out and made date-range filters
+  // disagree with themselves depending on the input format.
+  const ymd = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
     return isNaN(d.getTime()) ? null : d;
   }
   
