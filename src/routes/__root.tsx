@@ -17,6 +17,29 @@ import { useStore } from "../lib/store";
 import { LoginPage } from "@/components/LoginPage";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 
+// After a redeploy, a browser tab that's still open may hold references to
+// old hashed chunk filenames (e.g. collections-D4gWl40X.js) that no longer
+// exist on the server. Vite fires "vite:preloadError" when a lazy route
+// chunk 404s this way; the fix is a one-time hard reload to pick up the
+// fresh HTML/asset manifest. Guarded via sessionStorage so a genuinely
+// broken deploy doesn't reload-loop forever.
+const CHUNK_ERROR_PATTERN =
+  /fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|loading chunk .* failed/i;
+const CHUNK_RELOAD_FLAG = "jain-finance-chunk-reload-attempted";
+
+function isChunkLoadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return CHUNK_ERROR_PATTERN.test(message);
+}
+
+function reloadOnceForChunkError(): boolean {
+  if (typeof window === "undefined") return false;
+  if (sessionStorage.getItem(CHUNK_RELOAD_FLAG)) return false;
+  sessionStorage.setItem(CHUNK_RELOAD_FLAG, "1");
+  window.location.reload();
+  return true;
+}
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -42,9 +65,17 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+  const chunkError = isChunkLoadError(error);
+
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
+    // A stale chunk after a redeploy can't be fixed by re-running loaders —
+    // the module is permanently 404ing until the page fetches the new
+    // manifest, so recover automatically instead of leaving the user stuck.
+    if (chunkError) {
+      reloadOnceForChunkError();
+    }
+  }, [error, chunkError]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -53,11 +84,17 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
           This page didn't load
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+          {chunkError
+            ? "A new version of the app was published. Reloading to update…"
+            : "Something went wrong on our end. You can try refreshing or head back home."}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
+              if (chunkError) {
+                window.location.reload();
+                return;
+              }
               router.invalidate();
               reset();
             }}
@@ -133,6 +170,14 @@ function RootComponent() {
       recheckStatuses();
     }
   }, [currentUser, recheckStatuses]);
+
+  // This mount only happens after a successful render, so it's safe to
+  // re-arm the one-shot chunk-reload guard for the next deploy.
+  useEffect(() => {
+    sessionStorage.removeItem(CHUNK_RELOAD_FLAG);
+    window.addEventListener("vite:preloadError", reloadOnceForChunkError);
+    return () => window.removeEventListener("vite:preloadError", reloadOnceForChunkError);
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

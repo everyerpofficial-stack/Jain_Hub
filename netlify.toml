@@ -50,7 +50,8 @@
   [headers.values]
     Cache-Control = "public, max-age=86400"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# No catch-all SPA redirect here: this app is server-rendered (TanStack Start
+# + Nitro's "netlify" preset), which deploys as a Netlify Function that
+# self-registers for all paths (path = "/*", preferStatic = true). The build
+# never emits dist/index.html, so a static "/* -> /index.html" rewrite (as
+# used by plain client-side SPAs) 404s instead of reaching the SSR function.
