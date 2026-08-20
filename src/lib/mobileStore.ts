@@ -638,7 +638,7 @@ export const useMobileStore = create<MobilesState>()(
           amount,
           date,
           remark,
-          paymentMode: paymentMode as "Cash" | "Bank" | "Cash & Bank",
+          paymentMode,
           cashAmount,
           bankAmount,
         };
@@ -1073,7 +1073,25 @@ export const useMobileStore = create<MobilesState>()(
 
           set({ expenses: expRows as unknown as MobileExpense[] });
           set({ suppliers: supRows as unknown as MobileSupplier[] });
-          set({ supplierPayments: supPayRows as unknown as SupplierPayment[] });
+
+          // Sanitise supplier payments — paymentMode must survive the Sheets
+          // round-trip or splitByMethod defaults every payment to bank/UPI.
+          const sanitizedSupPayments = supPayRows.map((r: any) => {
+            const mode = String(r.paymentMode || "").trim();
+            const normalizedMode =
+              mode === "Cash" ? "Cash"
+              : mode === "UPI" || mode === "Bank" ? "UPI"
+              : mode === "Cash & UPI" || mode === "Cash & Bank" ? "Cash & UPI"
+              : r.paymentMode || "Cash";
+            return {
+              ...r,
+              amount: Number(r.amount) || 0,
+              paymentMode: normalizedMode,
+              cashAmount: toOptionalNumber(r.cashAmount),
+              bankAmount: toOptionalNumber(r.bankAmount),
+            };
+          });
+          set({ supplierPayments: sanitizedSupPayments as unknown as SupplierPayment[] });
 
           const sanitizedCustomers = custRows.map((r: any) => ({
             ...r,
@@ -1084,7 +1102,35 @@ export const useMobileStore = create<MobilesState>()(
           set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
 
           set({ products: prodRows as unknown as MobileProduct[] });
-          set({ purchases: purRows as unknown as MobilePurchase[] });
+
+          // Sanitise purchases — amount/quantity must be numbers for
+          // settleSupplier arithmetic, and paymentMode must be normalised
+          // so splitByMethod routes cash payments correctly.
+          const sanitizedPurchases = purRows.map((r: any) => {
+            let parsedItems = [];
+            if (Array.isArray(r.items)) {
+              parsedItems = r.items;
+            } else if (typeof r.items === "string" && r.items.trim()) {
+              try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
+            }
+            const mode = String(r.paymentMode || "").trim();
+            const normalizedMode =
+              mode === "Cash" ? "Cash"
+              : mode === "UPI" || mode === "Bank" ? "UPI"
+              : mode === "Cash & UPI" || mode === "Cash & Bank" ? "Cash & UPI"
+              : r.paymentMode || undefined;
+            return {
+              ...r,
+              amount: Number(r.amount) || 0,
+              quantity: Number(r.quantity) || 0,
+              gst: Number(r.gst) || 0,
+              paymentMode: normalizedMode,
+              cashAmount: toOptionalNumber(r.cashAmount),
+              bankAmount: toOptionalNumber(r.bankAmount),
+              items: parsedItems,
+            };
+          });
+          set({ purchases: sanitizedPurchases as unknown as MobilePurchase[] });
 
           const sanitizedAcc = accRows.map((r: any) => ({
             ...r,

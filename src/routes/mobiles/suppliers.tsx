@@ -32,13 +32,23 @@ function SupplierDetailsDialog({
     (p) =>
       p.supplierId === supplier.id ||
       (p.supplierName && p.supplierName.trim().toLowerCase() === supplier.name.trim().toLowerCase())
-  );
+  ).sort((a, b) => {
+    const da = new Date(a.date).getTime();
+    const db = new Date(b.date).getTime();
+    if (Number.isNaN(da) || Number.isNaN(db) || da === db) return b.id.localeCompare(a.id);
+    return db - da;
+  });
 
   const matchedPayments = supplierPayments.filter(
     (pay) =>
       pay.supplierId === supplier.id ||
       (pay.supplierName && pay.supplierName.trim().toLowerCase() === supplier.name.trim().toLowerCase())
-  );
+  ).sort((a, b) => {
+    const da = new Date(a.date).getTime();
+    const db = new Date(b.date).getTime();
+    if (Number.isNaN(da) || Number.isNaN(db) || da === db) return b.id.localeCompare(a.id);
+    return db - da;
+  });
 
   const allPayments = matchedPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
   const settlement = settleSupplier(supplierPurchases, allPayments);
