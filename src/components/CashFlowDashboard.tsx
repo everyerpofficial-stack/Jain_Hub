@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 import { Card, SectionHeader, StatCard, Badge } from "@/components/ui-kit";
 import { useStore, parseAppDate, parseAmount, isDateInRange, downloadExcel, downloadLedgerPDF } from "@/lib/store";
+import { splitByMethod, toOptionalNumber } from "@/lib/ledger";
 import { useMobileStore } from "@/lib/mobileStore";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -32,6 +33,7 @@ interface CashFlowItem {
   amount: number;
   method: "Cash" | "UPI";
 }
+
 
 export function CashFlowDashboard() {
   const {
@@ -239,10 +241,18 @@ export function CashFlowDashboard() {
     mSales.forEach((s) => {
       const dObj = parseAppDate(s.date);
       
-      // Handle cash portion
-      const cashAmt = s.cashAmountPaid !== undefined ? s.cashAmountPaid : 
-                      s.paymentMethod === "Cash" ? s.totalAmount : 
-                      s.paymentMethod === "Cash & UPI" ? s.totalAmount / 2 : 0;
+      // Only money actually RECEIVED is an inflow. The old fallback used
+      // s.totalAmount, so a partly-paid bill booked its full value as cash;
+      // and a blank cashAmountPaid coming back from Sheets ("") passed the
+      // `!== undefined` test and then failed `> 0`, dropping the row entirely.
+      const received = Number(s.amountPaid) || 0;
+      const storedCash = toOptionalNumber(s.cashAmountPaid);
+      const storedUpi = toOptionalNumber(s.upiAmountPaid);
+      const hasStoredSplit = storedCash !== undefined || storedUpi !== undefined;
+      const fallback = splitByMethod(s.paymentMethod, received);
+      const cashAmt = hasStoredSplit
+        ? (storedCash ?? Math.max(0, received - (storedUpi ?? 0)))
+        : fallback.cash;
       
       if (cashAmt > 0) {
         items.push({
@@ -258,10 +268,9 @@ export function CashFlowDashboard() {
         });
       }
 
-      // Handle UPI portion
-      const upiAmt = s.upiAmountPaid !== undefined ? s.upiAmountPaid : 
-                     s.paymentMethod === "UPI" ? s.totalAmount : 
-                     s.paymentMethod === "Cash & UPI" ? s.totalAmount / 2 : 0;
+      const upiAmt = hasStoredSplit
+        ? (storedUpi ?? Math.max(0, received - cashAmt))
+        : fallback.bank;
       
       if (upiAmt > 0) {
         items.push({
@@ -336,34 +345,68 @@ export function CashFlowDashboard() {
     mPurchases.forEach((p) => {
       if (p.status === "Paid") {
         const dObj = parseAppDate(p.date);
-        items.push({
-          id: `M-PUR-${p.id}`,
-          date: p.date,
-          dateObj: dObj,
-          module: "Mobiles",
-          type: "Outflow",
-          category: "Stock Purchase",
-          description: `Purchase Invoice ${p.invoiceNo} from ${p.supplierName}`,
-          amount: p.amount,
-          method: "UPI", // Wholesale purchases are UPI/Bank
-        });
+        const { cash, bank } = splitByMethod(p.paymentMode, p.amount, p.cashAmount, p.bankAmount);
+        const split = cash > 0 && bank > 0;
+        if (cash > 0) {
+          items.push({
+            id: `M-PUR-${p.id}-CASH`,
+            date: p.date,
+            dateObj: dObj,
+            module: "Mobiles",
+            type: "Outflow",
+            category: "Stock Purchase",
+            description: `Purchase Invoice ${p.invoiceNo} from ${p.supplierName}${split ? " (Cash portion)" : ""}`,
+            amount: cash,
+            method: "Cash",
+          });
+        }
+        if (bank > 0) {
+          items.push({
+            id: `M-PUR-${p.id}-BANK`,
+            date: p.date,
+            dateObj: dObj,
+            module: "Mobiles",
+            type: "Outflow",
+            category: "Stock Purchase",
+            description: `Purchase Invoice ${p.invoiceNo} from ${p.supplierName}${split ? " (UPI/Bank portion)" : ""}`,
+            amount: bank,
+            method: "UPI",
+          });
+        }
       }
     });
 
     // Mobile Supplier payments for outstanding debt (Outflow)
     mSupplierPayments.forEach((sp) => {
       const dObj = parseAppDate(sp.date);
-      items.push({
-        id: `M-SUPP-${sp.id}`,
-        date: sp.date,
-        dateObj: dObj,
-        module: "Mobiles",
-        type: "Outflow",
-        category: "Supplier Payment",
-        description: `Paid outstanding balance to vendor: ${sp.supplierName}`,
-        amount: sp.amount,
-        method: "UPI", // Vendor ledger clearance via Bank/UPI
-      });
+      const { cash, bank } = splitByMethod(sp.paymentMode, sp.amount, sp.cashAmount, sp.bankAmount);
+      const split = cash > 0 && bank > 0;
+      if (cash > 0) {
+        items.push({
+          id: `M-SUPP-${sp.id}-CASH`,
+          date: sp.date,
+          dateObj: dObj,
+          module: "Mobiles",
+          type: "Outflow",
+          category: "Supplier Payment",
+          description: `Paid outstanding balance to vendor: ${sp.supplierName}${split ? " (Cash portion)" : ""}`,
+          amount: cash,
+          method: "Cash",
+        });
+      }
+      if (bank > 0) {
+        items.push({
+          id: `M-SUPP-${sp.id}-BANK`,
+          date: sp.date,
+          dateObj: dObj,
+          module: "Mobiles",
+          type: "Outflow",
+          category: "Supplier Payment",
+          description: `Paid outstanding balance to vendor: ${sp.supplierName}${split ? " (UPI/Bank portion)" : ""}`,
+          amount: bank,
+          method: "UPI",
+        });
+      }
     });
 
     return items;

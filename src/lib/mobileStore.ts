@@ -4,6 +4,7 @@ import { formatDateToInr } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
 import { enqueueWrite } from "./syncQueue";
+import { toOptionalNumber } from "./ledger";
 
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   "TV": [
@@ -1051,6 +1052,8 @@ export const useMobileStore = create<MobilesState>()(
               totalAmount: Number(r.totalAmount) || 0,
               amountPaid: Number(r.amountPaid) || 0,
               dueAmount: Number(r.dueAmount) || 0,
+              cashAmountPaid: toOptionalNumber(r.cashAmountPaid),
+              upiAmountPaid: toOptionalNumber(r.upiAmountPaid),
               items: parsedItems,
             };
           });

@@ -15,6 +15,7 @@ import { useStore } from "./store";
 import { useMobileStore } from "./mobileStore";
 import { digestSheets, readSheet } from "./googleSheets";
 import { isSheetBusy } from "./syncQueue";
+import { toOptionalNumber } from "./ledger";
 import { toast } from "sonner";
 
 /** Poll interval in milliseconds (20 seconds — responsive yet quota-safe) */
@@ -314,6 +315,12 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
             totalAmount: Number(r.totalAmount) || 0,
             amountPaid: Number(r.amountPaid) || 0,
             dueAmount: Number(r.dueAmount) || 0,
+            // saleRow() writes these as "" when unset; without normalising,
+            // the blank comes back as a string that passes `!== undefined`
+            // and then fails `> 0`, silently dropping the sale's cash/UPI
+            // inflow from the Cash & UPI Flow ledger.
+            cashAmountPaid: toOptionalNumber(r.cashAmountPaid),
+            upiAmountPaid: toOptionalNumber(r.upiAmountPaid),
             items: parsedItems,
           };
         }

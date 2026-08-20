@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
 import { useMobileStore, MobileSupplier } from "@/lib/mobileStore";
+import { settleSupplier } from "@/lib/ledger";
 
 export const Route = createFileRoute("/mobiles/suppliers")({
   head: () => ({
@@ -39,11 +40,14 @@ function SupplierDetailsDialog({
       (pay.supplierName && pay.supplierName.trim().toLowerCase() === supplier.name.trim().toLowerCase())
   );
 
-  const totalPurchases = supplierPurchases.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const paidInvoices = supplierPurchases.filter((p) => p.status === "Paid").reduce((sum, p) => sum + (p.amount || 0), 0);
-  const paidPayments = matchedPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
-  const totalPaid = paidInvoices + paidPayments;
-  const currentOutstanding = supplierPurchases.length > 0 ? Math.max(0, totalPurchases - totalPaid) : supplier.outstanding;
+  const allPayments = matchedPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
+  const settlement = settleSupplier(supplierPurchases, allPayments);
+  const { totalPurchases, totalPaid } = settlement;
+  const currentOutstanding = supplierPurchases.length > 0 ? settlement.outstanding : supplier.outstanding;
+
+  /** Per-row settlement, including the Partial state the stored status can't express. */
+  const settlementFor = (p: { id: string; amount: number }) =>
+    settlement.byPurchaseId.get(p.id) ?? { paid: 0, due: p.amount || 0, label: "Outstanding" as const };
 
   const formatInr = (num: number) => "₹" + Math.round(num).toLocaleString("en-IN");
 
@@ -95,7 +99,7 @@ function SupplierDetailsDialog({
             <Card className="p-3 bg-emerald-500/10 border-emerald-500/20">
               <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider">Total Amount Paid</div>
               <div className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">{formatInr(totalPaid)}</div>
-              <div className="text-[10px] text-muted-foreground">{matchedPayments.length + supplierPurchases.filter(p => p.status === "Paid").length} payment txns</div>
+              <div className="text-[10px] text-muted-foreground">{matchedPayments.length} payment txns</div>
             </Card>
             <Card className="p-3 bg-red-500/10 border-red-500/20">
               <div className="text-[10px] text-red-600 dark:text-red-400 font-bold uppercase tracking-wider">Outstanding Debt</div>
@@ -129,26 +133,29 @@ function SupplierDetailsDialog({
                     </tr>
                   </thead>
                   <tbody>
-                    {supplierPurchases.map((p) => (
-                      <tr key={p.id} className="border-b border-border hover:bg-accent/20 last:border-0">
-                        <td className="py-2 px-3 font-mono font-semibold text-muted-foreground">{p.id}</td>
-                        <td className="py-2 px-3 text-muted-foreground">{p.date}</td>
-                        <td className="py-2 px-3 font-mono">{p.invoiceNo}</td>
-                        <td className="py-2 px-3 text-center font-bold">{p.quantity}</td>
-                        <td className="py-2 px-3 text-right font-bold">{formatInr(p.amount)}</td>
-                        <td className="py-2 px-3 text-right font-bold text-emerald-600">
-                          {p.status === "Paid" ? formatInr(p.amount) : "—"}
-                        </td>
-                        <td className="py-2 px-3 text-right font-bold text-red-500">
-                          {p.status === "Outstanding" ? formatInr(p.amount) : "—"}
-                        </td>
-                        <td className="py-2 px-3">
-                          <Badge tone={p.status === "Paid" ? "success" : "warning"}>
-                            {p.status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
+                    {supplierPurchases.map((p) => {
+                      const { paid, due, label } = settlementFor(p);
+                      return (
+                        <tr key={p.id} className="border-b border-border hover:bg-accent/20 last:border-0">
+                          <td className="py-2 px-3 font-mono font-semibold text-muted-foreground">{p.id}</td>
+                          <td className="py-2 px-3 text-muted-foreground">{p.date}</td>
+                          <td className="py-2 px-3 font-mono">{p.invoiceNo}</td>
+                          <td className="py-2 px-3 text-center font-bold">{p.quantity}</td>
+                          <td className="py-2 px-3 text-right font-bold">{formatInr(p.amount)}</td>
+                          <td className="py-2 px-3 text-right font-bold text-emerald-600">
+                            {paid > 0 ? formatInr(paid) : "—"}
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-red-500">
+                            {due > 0 ? formatInr(due) : "—"}
+                          </td>
+                          <td className="py-2 px-3">
+                            <Badge tone={label === "Paid" ? "success" : label === "Partial" ? "info" : "warning"}>
+                              {label}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -541,13 +548,18 @@ function SuppliersPage() {
       (pay) => pay.supplierId === s.id || (pay.supplierName && pay.supplierName.trim().toLowerCase() === s.name.trim().toLowerCase())
     );
 
-    const totalPurchases = sPurchases.reduce((sum, p) => sum + (p.amount || 0), 0);
-    const paidInvoices = sPurchases.filter((p) => p.status === "Paid").reduce((sum, p) => sum + (p.amount || 0), 0);
-    const paidPayments = sPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
-    const totalPaid = paidInvoices + paidPayments;
-    const outstanding = sPurchases.length > 0 ? Math.max(0, totalPurchases - totalPaid) : s.outstanding;
+    // Same rule as the profile dialog. Summing "Paid" purchases AND supplier
+    // payments counted every pay-now purchase twice (recordPurchase writes
+    // both records), which inflated Total Paid and understated the debt shown
+    // in this list and in the total-debt card.
+    const paymentTotal = sPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
+    const settled = settleSupplier(sPurchases, paymentTotal);
 
-    return { totalPurchases, totalPaid, outstanding };
+    return {
+      totalPurchases: settled.totalPurchases,
+      totalPaid: settled.totalPaid,
+      outstanding: sPurchases.length > 0 ? settled.outstanding : s.outstanding,
+    };
   };
 
   const filtered = combinedSuppliersList.filter((s) => {
