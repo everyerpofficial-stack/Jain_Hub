@@ -336,15 +336,24 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
             quantity: Number(r.quantity) || 0,
             amount: Number(r.amount) || 0,
             gst: Number(r.gst) || 0,
+            cashAmount: toOptionalNumber(r.cashAmount),
+            bankAmount: toOptionalNumber(r.bankAmount),
             items: parsedItems,
           };
         }
-        if (sheet === "Mobiles_SupplierPayments") {
+          if (sheet === "Mobiles_Expenses") {
+          return {
+            ...r,
+            cashAmount: toOptionalNumber(r.cashAmount),
+            bankAmount: toOptionalNumber(r.bankAmount),
+          };
+        }
+      if (sheet === "Mobiles_SupplierPayments") {
           return {
             ...r,
             amount: Number(r.amount) || 0,
-            cashAmount: r.cashAmount !== undefined ? Number(r.cashAmount) || 0 : undefined,
-            bankAmount: r.bankAmount !== undefined ? Number(r.bankAmount) || 0 : undefined,
+            cashAmount: toOptionalNumber(r.cashAmount),
+            bankAmount: toOptionalNumber(r.bankAmount),
           };
         }
         return r;

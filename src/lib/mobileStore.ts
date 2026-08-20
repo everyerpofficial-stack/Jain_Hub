@@ -383,10 +383,16 @@ function saleRow(s: MobileSale): SheetRow {
 }
 function purchaseRow(p: MobilePurchase): SheetRow {
   return {
-    id: p.id, supplierName: p.supplierName, invoiceNo: p.invoiceNo,
+    id: p.id, supplierId: p.supplierId || "", supplierName: p.supplierName, invoiceNo: p.invoiceNo,
     date: p.date, quantity: p.quantity, amount: p.amount, status: p.status,
     gst: p.gst,
     paymentMode: p.paymentMode || "",
+    // The Cash & UPI portions are captured by the purchase dialog and held in
+    // state, but were never written here — so after a sync the real split was
+    // gone and the cash-flow ledger fell back to halving the total. An uneven
+    // split (₹8,000 cash + ₹3,000 UPI) came back as ₹5,500/₹5,500.
+    cashAmount: p.cashAmount ?? "",
+    bankAmount: p.bankAmount ?? "",
     paymentRemark: p.paymentRemark || "",
     items: JSON.stringify(p.items || []),
   };
@@ -395,6 +401,8 @@ function mobileExpenseRow(e: MobileExpense): SheetRow {
   return {
     id: e.id, date: e.date, cat: e.cat, desc: e.desc,
     amount: e.amount, type: e.type ?? "Expense", paymentMode: e.paymentMode ?? "Cash",
+    cashAmount: e.cashAmount ?? "",
+    bankAmount: e.bankAmount ?? "",
   };
 }
 function supplierRow(s: MobileSupplier): SheetRow {
@@ -405,9 +413,13 @@ function supplierRow(s: MobileSupplier): SheetRow {
 }
 function supplierPaymentRow(p: SupplierPayment): SheetRow {
   return {
-    id: p.id, supplierName: p.supplierName, amount: p.amount,
+    // supplierId was omitted, so after a reload payments could only be matched
+    // back to a vendor by name — renaming a supplier detached their history.
+    id: p.id, supplierId: p.supplierId || "", supplierName: p.supplierName, amount: p.amount,
     date: p.date, remark: p.remark ?? "",
     paymentMode: p.paymentMode ?? "Cash",
+    cashAmount: p.cashAmount ?? "",
+    bankAmount: p.bankAmount ?? "",
   };
 }
 function mobileCustomerRow(c: MobileCustomer): SheetRow {
