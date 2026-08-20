@@ -30,3 +30,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Deploy artifacts. The app deploys to Vercel; Nitro picks its preset from the
+# host's own env vars, so no platform config is committed. Security headers are
+# applied in src/lib/security-headers.ts instead, which works on any host.
+.vercel
+.netlify
+deploy-netlify
