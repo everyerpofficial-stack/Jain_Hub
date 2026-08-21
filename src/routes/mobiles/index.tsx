@@ -11,7 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, ProgressBar, SectionHeader, StatCard } from "@/components/ui-kit";
 import { useMobileStore, MobileSale, safeItems } from "@/lib/mobileStore";
-import { parseAppDate, isDateInRange } from "@/lib/store";
+import { parseAppDate, isDateInRange, useStore } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 import { toast } from "sonner";
 
@@ -26,6 +26,7 @@ export const Route = createFileRoute("/mobiles/")({
 });
 
 function MobilesDashboard() {
+  const currentUser = useStore((s) => s.currentUser);
   const products = useMobileStore((s) => s.products);
   const inventory = useMobileStore((s) => s.inventory);
   const sales = useMobileStore((s) => s.sales);
@@ -236,7 +237,7 @@ function MobilesDashboard() {
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <div>
           <h1 className="text-[26px] font-semibold tracking-tight leading-tight">
-            {greeting}, Rajesh
+            {greeting}{currentUser?.name ? `, ${currentUser.name.split(" ")[0]}` : ""}
           </h1>
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
             {dateStr} · Jain Mobiles ERP Console

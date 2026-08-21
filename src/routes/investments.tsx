@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Trash2, Download } from "lucide-react";
+import { Plus, Trash2, Download, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -43,6 +43,7 @@ function InvestmentsPage() {
   const investments = useStore((s) => s.investments) || [];
   const customers = useStore((s) => s.customers) || [];
   const payments = useStore((s) => s.payments) || [];
+  const profitTransactions = useStore((s) => s.profitTransactions) || [];
   const deleteInvestment = useStore((s) => s.deleteInvestment);
   const currentUser = useStore((s) => s.currentUser);
   const { openDialog } = useUi();
@@ -124,6 +125,10 @@ function InvestmentsPage() {
   const totalReceived = totalDownpayments + totalPaymentsCollected;
   const netEarnings = totalFileCharges + totalInterestCollected;
 
+  const totalWithdrawn = profitTransactions.filter((t) => t.type === "Withdrawal").reduce((s, t) => s + t.amount, 0);
+  const totalRedeposited = profitTransactions.filter((t) => t.type === "Redeposit").reduce((s, t) => s + t.amount, 0);
+  const netTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
+
   return (
     <AppShell breadcrumb="Investments">
       {/* Main UI Header block */}
@@ -134,7 +139,19 @@ function InvestmentsPage() {
             {filteredInvestments.length} investors · ₹{total.toLocaleString("en-IN")} deployed
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => openDialog("withdrawProfit")}
+            className="h-9 px-3.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow transition-colors cursor-pointer"
+          >
+            <ArrowUpRight className="size-4" /> Withdraw Profit
+          </button>
+          <button
+            onClick={() => openDialog("depositProfit")}
+            className="h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow transition-colors cursor-pointer"
+          >
+            <ArrowDownRight className="size-4" /> Deposit Taken Money
+          </button>
           <button
             onClick={() => {
               downloadExcel("investments-portfolio.xlsx", "Investment Portfolio", filteredInvestments.map((inv) => ({
@@ -171,10 +188,11 @@ function InvestmentsPage() {
         endDate={endDate}
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <StatCard label="Financed Principal" value={`₹${balanceForEmi.toLocaleString("en-IN")}`} sub={`${filteredCustomers.length} active customer loans`} trend="up" />
         <StatCard label="Total Received (Returns)" value={`₹${totalReceived.toLocaleString("en-IN")}`} sub="Downpayments & collections" trend="up" />
         <StatCard label="Net Financing Profit" value={`₹${netEarnings.toLocaleString("en-IN")}`} sub="File charges & interest" trend="up" />
+        <StatCard label="Outstanding Taken Profit" value={`₹${netTakenBalance.toLocaleString("en-IN")}`} sub="Taken money to redeposit" trend={netTakenBalance > 0 ? "warn" : undefined} />
       </div>
 
       <div className="mt-6">

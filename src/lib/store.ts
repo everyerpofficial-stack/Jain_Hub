@@ -211,6 +211,18 @@ export type Investment = {
   method?: "Cash" | "UPI" | "Bank" | "Cash & Bank";
 };
 
+export type ProfitTransaction = {
+  id: string;
+  type: "Withdrawal" | "Redeposit";
+  amount: number;
+  formattedAmount: string;
+  date: string;
+  method: "Cash" | "UPI" | "Bank" | "Cash & Bank";
+  notes?: string;
+  withdrawnBy?: string;
+  takenBalanceAfter: number;
+};
+
 export type Notification = {
   id: string;
   type: string;
@@ -499,6 +511,7 @@ type State = {
   payments: Payment[];
   expenses: Expense[];
   investments: Investment[];
+  profitTransactions: ProfitTransaction[];
   notifications: Notification[];
   audit: AuditEntry[];
   documents: AppDocument[];
@@ -519,7 +532,10 @@ type State = {
   deletePayment: (id: string) => void;
   deleteExpense: (id: string) => void;
   deleteInvestment: (id: string) => void;
+  deleteProfitTransaction: (id: string) => void;
   deleteDocument: (id: string) => void;
+  withdrawProfit: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank"; notes?: string }) => ProfitTransaction;
+  depositTakenMoney: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank"; notes?: string }) => ProfitTransaction;
   addCustomer: (input: {
     firstName: string; fatherName: string; surname: string;
     mobile: string; aadhaar: string;
@@ -663,6 +679,7 @@ export const useStore = create<State>()(
       payments: seedPayments,
       expenses: seedExpenses,
       investments: seedInvestments,
+      profitTransactions: [],
       notifications: seedNotifications,
       audit: seedAudit,
       documents: [],
@@ -996,6 +1013,22 @@ export const useStore = create<State>()(
           ],
         }));
         syncDelete(get, "Finance_Investments", id, "investment delete");
+      },
+
+      deleteProfitTransaction: (id) => {
+        const found = (get().profitTransactions || []).find((t) => t.id === id);
+        set((s) => ({
+          profitTransactions: (s.profitTransactions || []).filter((t) => t.id !== id),
+          audit: [
+            {
+              ts: new Date().toLocaleString("en-IN"),
+              user: s.currentUser?.name || "System",
+              action: "Deleted profit transaction",
+              target: `${id} · ${found?.type || ""} (${found?.formattedAmount || ""})`,
+            },
+            ...s.audit,
+          ],
+        }));
       },
 
       deleteDocument: (id) => {
@@ -1464,6 +1497,95 @@ export const useStore = create<State>()(
         }));
         syncUpsert(get, "Finance_Investments", investmentRow(investment), "investment");
         return investment;
+      },
+
+      withdrawProfit: (input) => {
+        const currentTxs = get().profitTransactions || [];
+        const existing = currentTxs.filter((t) => t.id.startsWith("PW-"));
+        const maxId = existing.reduce((max, t) => {
+          const n = parseInt(t.id.replace("PW-", ""), 10);
+          return isNaN(n) ? max : Math.max(max, n);
+        }, 0);
+        const id = "PW-" + (maxId + 1).toString().padStart(3, "0");
+
+        const totalWithdrawn = currentTxs.filter(t => t.type === "Withdrawal").reduce((s, t) => s + t.amount, 0);
+        const totalRedeposited = currentTxs.filter(t => t.type === "Redeposit").reduce((s, t) => s + t.amount, 0);
+        const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
+        const newTakenBalance = currentTakenBalance + input.amount;
+
+        const txn: ProfitTransaction = {
+          id,
+          type: "Withdrawal",
+          amount: input.amount,
+          formattedAmount: fmtInr(input.amount),
+          date: input.date ? formatDateToInr(input.date) : today(),
+          method: input.method ?? "Cash",
+          notes: input.notes || "Profit Withdrawal",
+          withdrawnBy: get().currentUser?.name || "Admin",
+          takenBalanceAfter: newTakenBalance,
+        };
+
+        set((s) => ({
+          profitTransactions: [txn, ...(s.profitTransactions || [])],
+          audit: [
+            {
+              ts: new Date().toLocaleString("en-IN"),
+              user: s.currentUser?.name || "System",
+              action: "Withdrew profit",
+              target: `${id} · ₹${input.amount.toLocaleString("en-IN")} (${input.notes || "Withdrawal"})`,
+            },
+            ...s.audit,
+          ],
+        }));
+
+        return txn;
+      },
+
+      depositTakenMoney: (input) => {
+        const currentTxs = get().profitTransactions || [];
+        const totalWithdrawn = currentTxs.filter(t => t.type === "Withdrawal").reduce((s, t) => s + t.amount, 0);
+        const totalRedeposited = currentTxs.filter(t => t.type === "Redeposit").reduce((s, t) => s + t.amount, 0);
+        const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
+
+        if (input.amount > currentTakenBalance) {
+          throw new Error(`Cannot deposit ₹${input.amount.toLocaleString("en-IN")} which exceeds outstanding taken balance of ₹${currentTakenBalance.toLocaleString("en-IN")}`);
+        }
+
+        const existing = currentTxs.filter((t) => t.id.startsWith("PR-"));
+        const maxId = existing.reduce((max, t) => {
+          const n = parseInt(t.id.replace("PR-", ""), 10);
+          return isNaN(n) ? max : Math.max(max, n);
+        }, 0);
+        const id = "PR-" + (maxId + 1).toString().padStart(3, "0");
+
+        const newTakenBalance = currentTakenBalance - input.amount;
+
+        const txn: ProfitTransaction = {
+          id,
+          type: "Redeposit",
+          amount: input.amount,
+          formattedAmount: fmtInr(input.amount),
+          date: input.date ? formatDateToInr(input.date) : today(),
+          method: input.method ?? "Cash",
+          notes: input.notes || "Redeposit Taken Profit",
+          withdrawnBy: get().currentUser?.name || "Admin",
+          takenBalanceAfter: newTakenBalance,
+        };
+
+        set((s) => ({
+          profitTransactions: [txn, ...(s.profitTransactions || [])],
+          audit: [
+            {
+              ts: new Date().toLocaleString("en-IN"),
+              user: s.currentUser?.name || "System",
+              action: "Redeposited taken profit",
+              target: `${id} · ₹${input.amount.toLocaleString("en-IN")} (${input.notes || "Redeposit"})`,
+            },
+            ...s.audit,
+          ],
+        }));
+
+        return txn;
       },
 
       sendWhatsapp: ({ to, kind }) => {

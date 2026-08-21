@@ -17,7 +17,7 @@ import {
 // "report" used to sit in this union with no component behind it, which is
 // how openDialog("loan") became a button that opened nothing — keep the two
 // lists in step so wiring a key with no dialog fails to compile.
-type DialogKey = null | "customer" | "loan" | "expense" | "investment" | "payment" | "collect";
+type DialogKey = null | "customer" | "loan" | "expense" | "investment" | "payment" | "collect" | "withdrawProfit" | "depositProfit";
 
 type UiState = {
   open: DialogKey;
@@ -853,6 +853,246 @@ function LoanDialog() {
   );
 }
 
+function WithdrawProfitDialog() {
+  const { open, close } = useUi();
+  const isOpen = open === "withdrawProfit";
+
+  const customers = useStore((s) => s.customers);
+  const payments = useStore((s) => s.payments);
+  const expenses = useStore((s) => s.expenses);
+  const profitTransactions = useStore((s) => s.profitTransactions) || [];
+  const withdrawProfit = useStore((s) => s.withdrawProfit);
+
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(getTodayYmd());
+  const [method, setMethod] = useState<"Cash" | "UPI" | "Bank" | "Cash & Bank">("Cash");
+  const [notes, setNotes] = useState("Owner Profit Withdrawal");
+
+  useEffect(() => {
+    if (isOpen) {
+      setAmount("");
+      setDate(getTodayYmd());
+      setMethod("Cash");
+      setNotes("Owner Profit Withdrawal");
+    }
+  }, [isOpen]);
+
+  const totalFileCharge = customers.reduce((s, c) => s + (c.fileCharge || 0), 0);
+  const custInterestMap = new Map(customers.map((c) => [c.id, c.interestPerMonth || 0]));
+  const totalInterestIncome = payments
+    .filter((p) => p.status === "Success")
+    .reduce((sum, p) => sum + (custInterestMap.get(p.customerId) || 0), 0);
+  const totalExpenses = expenses.reduce((s, e) => s + (typeof e.amount === "number" ? e.amount : Number(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
+  const netProfit = (totalFileCharge + totalInterestIncome) - totalExpenses;
+
+  const totalWithdrawn = profitTransactions.filter((t) => t.type === "Withdrawal").reduce((s, t) => s + t.amount, 0);
+  const totalRedeposited = profitTransactions.filter((t) => t.type === "Redeposit").reduce((s, t) => s + t.amount, 0);
+  const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
+
+  const amountNum = Number(amount) || 0;
+  const canSubmit = amountNum > 0;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(v) => !v && close()}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Withdraw Profit from Business</DialogTitle>
+          <DialogDescription>
+            Withdraw available net profit or capital distribution from the business fund.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+            <div>
+              <span className="text-muted-foreground block">Net Profit Balance</span>
+              <span className={`text-sm font-bold ${netProfit >= 0 ? "text-success" : "text-danger"}`}>
+                ₹{Math.round(netProfit).toLocaleString("en-IN")}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block">Taken Money Balance</span>
+              <span className="text-sm font-bold text-amber-600 dark:text-amber-400">
+                ₹{Math.round(currentTakenBalance).toLocaleString("en-IN")}
+              </span>
+            </div>
+          </div>
+
+          <Field
+            label="Withdrawal Amount (₹)"
+            value={amount}
+            onChange={setAmount}
+            type="number"
+            inputMode="numeric"
+            placeholder="e.g. 25000"
+            highlight
+          />
+          <Field
+            label="Date"
+            value={date}
+            onChange={setDate}
+            type="date"
+          />
+          <Select
+            label="Payment Mode"
+            value={method}
+            onChange={(v) => setMethod(v as any)}
+            options={["Cash", "UPI", "Bank", "Cash & Bank"]}
+          />
+          <Field
+            label="Reason / Notes"
+            value={notes}
+            onChange={setNotes}
+            placeholder="e.g. Personal profit distribution"
+          />
+
+          {amountNum > netProfit && netProfit > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+              ⚠️ Note: Withdrawing ₹{amountNum.toLocaleString("en-IN")} which is higher than current net profit of ₹{Math.round(netProfit).toLocaleString("en-IN")}.
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <GhostBtn onClick={close}>Cancel</GhostBtn>
+          <PrimaryBtn
+            disabled={!canSubmit}
+            onClick={() => {
+              try {
+                const txn = withdrawProfit({
+                  amount: amountNum,
+                  date,
+                  method,
+                  notes: notes.trim(),
+                });
+                toast.success(`Withdrew ₹${txn.amount.toLocaleString("en-IN")} from profit`);
+                close();
+              } catch (err) {
+                toast.error("Withdrawal failed", {
+                  description: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }}
+          >
+            Withdraw Profit
+          </PrimaryBtn>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DepositProfitDialog() {
+  const { open, close } = useUi();
+  const isOpen = open === "depositProfit";
+
+  const profitTransactions = useStore((s) => s.profitTransactions) || [];
+  const depositTakenMoney = useStore((s) => s.depositTakenMoney);
+
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(getTodayYmd());
+  const [method, setMethod] = useState<"Cash" | "UPI" | "Bank" | "Cash & Bank">("Cash");
+  const [notes, setNotes] = useState("Redeposit Taken Profit");
+
+  useEffect(() => {
+    if (isOpen) {
+      setAmount("");
+      setDate(getTodayYmd());
+      setMethod("Cash");
+      setNotes("Redeposit Taken Profit");
+    }
+  }, [isOpen]);
+
+  const totalWithdrawn = profitTransactions.filter((t) => t.type === "Withdrawal").reduce((s, t) => s + t.amount, 0);
+  const totalRedeposited = profitTransactions.filter((t) => t.type === "Redeposit").reduce((s, t) => s + t.amount, 0);
+  const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
+
+  const amountNum = Number(amount) || 0;
+  const isExceedingTaken = amountNum > currentTakenBalance;
+  const canSubmit = amountNum > 0 && !isExceedingTaken;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(v) => !v && close()}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Deposit Taken Profit Back</DialogTitle>
+          <DialogDescription>
+            Deposit back previously taken profit money into the business fund.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+            <span className="text-muted-foreground block font-medium">Outstanding Taken Money to Redeposit</span>
+            <span className="text-base font-bold text-amber-600 dark:text-amber-400">
+              ₹{Math.round(currentTakenBalance).toLocaleString("en-IN")}
+            </span>
+          </div>
+
+          <Field
+            label="Deposit Amount (₹)"
+            value={amount}
+            onChange={setAmount}
+            type="number"
+            inputMode="numeric"
+            placeholder="e.g. 10000"
+            highlight
+          />
+          <Field
+            label="Date"
+            value={date}
+            onChange={setDate}
+            type="date"
+          />
+          <Select
+            label="Payment Mode"
+            value={method}
+            onChange={(v) => setMethod(v as any)}
+            options={["Cash", "UPI", "Bank", "Cash & Bank"]}
+          />
+          <Field
+            label="Reason / Remarks"
+            value={notes}
+            onChange={setNotes}
+            placeholder="e.g. Redepositing taken profit"
+          />
+
+          {isExceedingTaken && (
+            <p className="text-xs text-danger font-medium">
+              ⛔ Cannot deposit ₹{amountNum.toLocaleString("en-IN")}, which exceeds taken profit balance of ₹{currentTakenBalance.toLocaleString("en-IN")}. You must deposit taken money only.
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <GhostBtn onClick={close}>Cancel</GhostBtn>
+          <PrimaryBtn
+            disabled={!canSubmit}
+            onClick={() => {
+              try {
+                const txn = depositTakenMoney({
+                  amount: amountNum,
+                  date,
+                  method,
+                  notes: notes.trim(),
+                });
+                toast.success(`Deposited ₹${txn.amount.toLocaleString("en-IN")} back into business fund`);
+                close();
+              } catch (err) {
+                toast.error("Deposit failed", {
+                  description: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }}
+          >
+            Deposit Taken Money
+          </PrimaryBtn>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function AppDialogs() {
   return (
     <>
@@ -861,6 +1101,8 @@ export function AppDialogs() {
       <CollectDialog />
       <ExpenseDialog />
       <InvestmentDialog />
+      <WithdrawProfitDialog />
+      <DepositProfitDialog />
     </>
   );
 }

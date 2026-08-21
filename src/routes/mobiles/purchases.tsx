@@ -44,7 +44,10 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
   const [productId, setProductId] = useState("");
   const [qty, setQty] = useState("1");
   const [cost, setCost] = useState("");
-  const [payNow, setPayNow] = useState(false);
+  
+  // Payment Status selection: "Paid" | "Partial Paid" | "Not Paid"
+  const [paymentStatus, setPaymentStatus] = useState<"Paid" | "Partial Paid" | "Not Paid">("Not Paid");
+  const [partialAmount, setPartialAmount] = useState<number | "">("");
   const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
   const [cashAmount, setCashAmount] = useState<number | "">("");
   const [bankAmount, setBankAmount] = useState<number | "">("");
@@ -150,21 +153,43 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
   const totalQty = items.reduce((sum, item) => sum + item.quantity, 0);
   const totalAmount = items.reduce((sum, item) => sum + item.quantity * item.cost, 0);
 
-  const handlePayNowToggle = (checked: boolean) => {
-    setPayNow(checked);
-    if (checked && paymentMode === "Cash & UPI") {
-      const half = Math.floor(totalAmount / 2);
-      setCashAmount(half);
-      setBankAmount(totalAmount - half);
+  const getEffectivePaid = () => {
+    if (paymentStatus === "Paid") return totalAmount;
+    if (paymentStatus === "Partial Paid") return Math.min(totalAmount, Math.max(0, Number(partialAmount) || 0));
+    return 0;
+  };
+  const effectivePaid = getEffectivePaid();
+  const effectiveDue = Math.max(0, totalAmount - effectivePaid);
+
+  const handleStatusChange = (status: "Paid" | "Partial Paid" | "Not Paid") => {
+    setPaymentStatus(status);
+    if (status === "Paid") {
+      setPartialAmount(totalAmount);
+      if (paymentMode === "Cash & UPI") {
+        const half = Math.floor(totalAmount / 2);
+        setCashAmount(half);
+        setBankAmount(totalAmount - half);
+      }
+    } else if (status === "Partial Paid") {
+      const defaultPartial = Math.floor(totalAmount / 2);
+      setPartialAmount(defaultPartial);
+      if (paymentMode === "Cash & UPI") {
+        const half = Math.floor(defaultPartial / 2);
+        setCashAmount(half);
+        setBankAmount(defaultPartial - half);
+      }
+    } else {
+      setPartialAmount("");
     }
   };
 
   const handleModeChange = (mode: "Cash" | "UPI" | "Cash & UPI") => {
     setPaymentMode(mode);
+    const currentPaid = getEffectivePaid();
     if (mode === "Cash & UPI") {
-      const half = Math.floor(totalAmount / 2);
+      const half = Math.floor(currentPaid / 2);
       setCashAmount(half);
-      setBankAmount(totalAmount - half);
+      setBankAmount(currentPaid - half);
     }
   };
 
@@ -173,11 +198,28 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
   const handleSubmit = () => {
     if (!selectedSupplier) return;
     
-    if (payNow && paymentMode === "Cash & UPI") {
+    let paidAmount = 0;
+    if (paymentStatus === "Paid") {
+      paidAmount = totalAmount;
+    } else if (paymentStatus === "Partial Paid") {
+      paidAmount = Number(partialAmount) || 0;
+      if (paidAmount <= 0) {
+        toast.error("Please enter a valid partial payment amount (> 0)");
+        return;
+      }
+      if (paidAmount >= totalAmount) {
+        toast.error("Partial amount cannot be greater than or equal to Total Invoice Value. Please select 'Paid' instead.");
+        return;
+      }
+    } else {
+      paidAmount = 0;
+    }
+
+    if (paymentStatus !== "Not Paid" && paymentMode === "Cash & UPI") {
       const c = Number(cashAmount) || 0;
       const b = Number(bankAmount) || 0;
-      if (c + b !== totalAmount) {
-        toast.error(`Cash (₹${c}) + UPI (₹${b}) must equal Total Invoice Value (₹${totalAmount})`);
+      if (c + b !== paidAmount) {
+        toast.error(`Cash (₹${c}) + UPI (₹${b}) must equal Paid Amount (₹${paidAmount})`);
         return;
       }
     }
@@ -188,15 +230,16 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
       invoiceNo: invoiceNo.trim(),
       date: new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
       quantity: totalQty,
-      payNow,
-      paymentMode: payNow ? paymentMode : undefined,
-      cashAmount: payNow ? (paymentMode === "Cash & UPI" ? (Number(cashAmount) || 0) : paymentMode === "Cash" ? totalAmount : 0) : undefined,
-      bankAmount: payNow ? (paymentMode === "Cash & UPI" ? (Number(bankAmount) || 0) : paymentMode === "UPI" ? totalAmount : 0) : undefined,
-      paymentRemark: payNow ? (paymentRemark.trim() || undefined) : undefined,
+      paymentStatus,
+      amountPaid: paidAmount,
+      paymentMode: paymentStatus !== "Not Paid" ? paymentMode : undefined,
+      cashAmount: paymentStatus !== "Not Paid" ? (paymentMode === "Cash & UPI" ? (Number(cashAmount) || 0) : paymentMode === "Cash" ? paidAmount : 0) : undefined,
+      bankAmount: paymentStatus !== "Not Paid" ? (paymentMode === "Cash & UPI" ? (Number(bankAmount) || 0) : paymentMode === "UPI" ? paidAmount : 0) : undefined,
+      paymentRemark: paymentStatus !== "Not Paid" ? (paymentRemark.trim() || undefined) : undefined,
       items
     });
 
-    toast.success(`Purchase logged successfully for invoice ${invoiceNo} with ${items.length} items`);
+    toast.success(`Purchase logged successfully for invoice ${invoiceNo} (${paymentStatus})`);
     if (onPurchaseLogged) {
       onPurchaseLogged(newPur);
     }
@@ -349,31 +392,84 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
               <button
                 type="button"
                 onClick={handleAddItem}
-                className="mt-2.5 w-full h-8 rounded border border-primary/20 bg-primary/5 text-primary text-xs font-bold hover:bg-primary hover:text-white transition-all shadow-sm"
+                className="mt-2.5 w-full h-8 rounded border border-primary/20 bg-primary/5 text-primary text-xs font-bold hover:bg-primary hover:text-white transition-all shadow-sm cursor-pointer"
               >
                 + Add Item to Order
               </button>
             </div>
 
-            {/* Payment Terms */}
-            <div className="space-y-2.5 border-t border-dashed border-border/80 pt-3">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="paynow"
-                  checked={payNow}
-                  onChange={(e) => handlePayNowToggle(e.target.checked)}
-                  className="rounded border-border text-primary focus:ring-0 cursor-pointer"
-                />
-                <label htmlFor="paynow" className="text-xs font-semibold text-foreground/80 cursor-pointer">
-                  Mark invoice as fully paid immediately (Cash / UPI)
-                </label>
+            {/* Payment Terms Section */}
+            <div className="space-y-3 border-t border-dashed border-border/80 pt-3">
+              <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest font-bold block">Payment Status & Terms</span>
+              
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange("Paid")}
+                  className={`py-2 px-2 rounded-lg border text-xs font-semibold text-center transition-all cursor-pointer ${
+                    paymentStatus === "Paid"
+                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-bold shadow-sm"
+                      : "border-border bg-surface text-muted-foreground hover:bg-accent/40"
+                  }`}
+                >
+                  ✓ Paid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange("Partial Paid")}
+                  className={`py-2 px-2 rounded-lg border text-xs font-semibold text-center transition-all cursor-pointer ${
+                    paymentStatus === "Partial Paid"
+                      ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold shadow-sm"
+                      : "border-border bg-surface text-muted-foreground hover:bg-accent/40"
+                  }`}
+                >
+                  ½ Partial Paid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange("Not Paid")}
+                  className={`py-2 px-2 rounded-lg border text-xs font-semibold text-center transition-all cursor-pointer ${
+                    paymentStatus === "Not Paid"
+                      ? "border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-400 font-bold shadow-sm"
+                      : "border-border bg-surface text-muted-foreground hover:bg-accent/40"
+                  }`}
+                >
+                  ✕ Not Paid
+                </button>
               </div>
 
-              {payNow && (
+              {/* Partial Paid Amount input */}
+              {paymentStatus === "Partial Paid" && (
+                <div className="bg-amber-500/5 p-3 rounded-lg border border-amber-500/30 space-y-2 animate-in fade-in duration-200">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-amber-800 dark:text-amber-300">Amount Paid Upfront (₹)</span>
+                    <span className="text-[11px] text-muted-foreground">Due Balance: <strong className="text-danger font-bold">₹{effectiveDue.toLocaleString("en-IN")}</strong></span>
+                  </div>
+                  <input
+                    type="number"
+                    max={totalAmount > 0 ? totalAmount - 1 : undefined}
+                    value={partialAmount}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? "" : Number(e.target.value);
+                      setPartialAmount(val);
+                      if (paymentMode === "Cash & UPI") {
+                        const paidNum = Number(val) || 0;
+                        const half = Math.floor(paidNum / 2);
+                        setCashAmount(half);
+                        setBankAmount(paidNum - half);
+                      }
+                    }}
+                    placeholder="Enter partial paid amount..."
+                    className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                  />
+                </div>
+              )}
+
+              {/* Payment Mode options when Paid or Partial Paid */}
+              {paymentStatus !== "Not Paid" && (
                 <div className="bg-muted/20 p-3 rounded-lg border border-border/60 space-y-3 animate-in fade-in duration-200">
                   <label className="block">
-                    <span className="text-xs font-semibold text-muted-foreground">Payment Mode</span>
+                    <span className="text-xs font-semibold text-muted-foreground">Payment Mode ({paymentStatus === "Paid" ? "Full Amount" : "Upfront Amount"})</span>
                     <select
                       value={paymentMode}
                       onChange={(e) => handleModeChange(e.target.value as "Cash" | "UPI" | "Cash & UPI")}
@@ -395,7 +491,7 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
                           onChange={(e) => {
                             const c = Number(e.target.value) || 0;
                             setCashAmount(c);
-                            setBankAmount(Math.max(0, totalAmount - c));
+                            setBankAmount(Math.max(0, effectivePaid - c));
                           }}
                           className="mt-1 h-8 w-full rounded-md border border-border bg-surface px-2.5 text-xs font-semibold focus:outline-none"
                         />
@@ -408,7 +504,7 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
                           onChange={(e) => {
                             const b = Number(e.target.value) || 0;
                             setBankAmount(b);
-                            setCashAmount(Math.max(0, totalAmount - b));
+                            setCashAmount(Math.max(0, effectivePaid - b));
                           }}
                           className="mt-1 h-8 w-full rounded-md border border-border bg-surface px-2.5 text-xs font-semibold focus:outline-none"
                         />
@@ -437,12 +533,20 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
               </div>
               <div className="flex justify-between border-t border-border pt-1.5 mt-1.5 font-bold text-sm">
                 <span className="text-foreground">Total Invoice Value:</span>
-                <span className="text-success">₹{totalAmount.toLocaleString("en-IN")}</span>
+                <span className="text-foreground font-extrabold">₹{totalAmount.toLocaleString("en-IN")}</span>
               </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground italic mt-0.5">
+              <div className="flex justify-between text-xs pt-1 border-t border-border/50 font-semibold">
+                <span className="text-muted-foreground">Amount Paid Upfront:</span>
+                <span className="text-emerald-600 font-bold">₹{effectivePaid.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="flex justify-between text-xs font-semibold">
+                <span className="text-muted-foreground">Remaining Due:</span>
+                <span className={effectiveDue > 0 ? "text-rose-600 font-bold" : "text-muted-foreground"}>₹{effectiveDue.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-muted-foreground italic mt-1 pt-1 border-t border-border/50">
                 <span>Payment Terms:</span>
-                <span className={payNow ? "text-success font-bold" : "text-warning font-bold"}>
-                  {payNow ? "Paid Bill" : "Added to Outstanding Ledger"}
+                <span className={`font-bold ${paymentStatus === "Paid" ? "text-emerald-600" : paymentStatus === "Partial Paid" ? "text-amber-600" : "text-rose-600"}`}>
+                  {paymentStatus === "Paid" ? "Paid in Full" : paymentStatus === "Partial Paid" ? `Partial Paid (₹${effectivePaid.toLocaleString("en-IN")} Paid)` : "Not Paid (Added to Outstanding Ledger)"}
                 </span>
               </div>
             </div>
@@ -784,8 +888,10 @@ function PurchasesPage() {
 
   const [q, setQ] = useState("");
   const [selectedSupplierTab, setSelectedSupplierTab] = useState("All");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<"All" | "Paid" | "Partial Paid" | "Not Paid">("All");
   const [isAdding, setIsAdding] = useState(false);
   const [payingSupplier, setPayingSupplier] = useState<MobileSupplier | null>(null);
+  const [payingPurchase, setPayingPurchase] = useState<MobilePurchase | null>(null);
 
   const handlePrint = (purchase: MobilePurchase) => {
     const printWindow = window.open("", "_blank");
@@ -798,7 +904,6 @@ function PurchasesPage() {
 
     const itemHtml = safeItems(purchase?.items)
       .map(
-
         (item) => `
       <tr style="border-bottom: 1px solid #f1f5f9;">
         <td style="padding: 12px; color: #334155;">
@@ -811,6 +916,10 @@ function PurchasesPage() {
     `
       )
       .join("");
+
+    const pStat = purchase.paymentStatus || (purchase.status === "Paid" ? "Paid" : purchase.status === "Partial Paid" ? "Partial Paid" : "Not Paid");
+    const pPaid = purchase.amountPaid !== undefined ? purchase.amountPaid : (pStat === "Paid" ? purchase.amount : 0);
+    const pDue = purchase.dueAmount !== undefined ? purchase.dueAmount : Math.max(0, purchase.amount - pPaid);
 
     const invoiceContent = `
       <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; padding: 40px; max-width: 800px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: white; color: #1e293b; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);">
@@ -838,8 +947,10 @@ function PurchasesPage() {
           </div>
           <div style="border-left: 1px solid #e2e8f0; padding-left: 16px;">
             <h3 style="margin: 0 0 8px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.05em;">Payment Details</h3>
-            <p style="margin: 3px 0;"><strong>Status:</strong> ${escapeHtml(purchase.status)}</p>
-            <p style="margin: 3px 0;"><strong>Total Purchase Amount:</strong> ₹${purchase.amount.toLocaleString("en-IN")}</p>
+            <p style="margin: 3px 0;"><strong>Payment Status:</strong> ${escapeHtml(pStat)}</p>
+            <p style="margin: 3px 0;"><strong>Total Bill Value:</strong> ₹${purchase.amount.toLocaleString("en-IN")}</p>
+            <p style="margin: 3px 0;"><strong>Amount Paid:</strong> ₹${pPaid.toLocaleString("en-IN")}</p>
+            <p style="margin: 3px 0;"><strong>Remaining Due:</strong> ₹${pDue.toLocaleString("en-IN")}</p>
           </div>
         </div>
 
@@ -911,6 +1022,11 @@ function PurchasesPage() {
       const matchId = (p.supplierId || "") === selectedSupplierTab;
       if (!matchName && !matchId) return false;
     }
+
+    if (paymentStatusFilter !== "All") {
+      const pStat = p.paymentStatus || (p.status === "Paid" ? "Paid" : p.status === "Partial Paid" ? "Partial Paid" : "Not Paid");
+      if (pStat !== paymentStatusFilter) return false;
+    }
     
     if (q) {
       const text = q.toLowerCase();
@@ -938,14 +1054,10 @@ function PurchasesPage() {
         name: p.supplierName,
         contact: "—",
         address: "—",
-        outstanding: p.status === "Outstanding" ? p.amount : 0,
+        outstanding: p.dueAmount !== undefined ? p.dueAmount : (p.status === "Outstanding" || p.status === "Not Paid" ? p.amount : 0),
       });
     }
   });
-
-  const supplierTabs = Array.from(
-    new Set(["All", ...combinedSuppliersList.map((s) => s.name)])
-  );
 
   const totalOutstanding = suppliers.reduce((sum, s) => sum + s.outstanding, 0);
   const periodPurchaseVal = filteredPurchases.reduce((sum, p) => sum + p.amount, 0);
@@ -957,6 +1069,7 @@ function PurchasesPage() {
     <AppShell breadcrumb="Purchases">
       {isAdding && <PurchaseFormDialog onClose={() => setIsAdding(false)} onPurchaseLogged={(p) => handlePrint(p)} />}
       {payingSupplier && <SupplierPayDialog supplier={payingSupplier} onClose={() => setPayingSupplier(null)} />}
+      {payingPurchase && <PayPurchaseBalanceDialog purchase={payingPurchase} onClose={() => setPayingPurchase(null)} />}
 
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
@@ -969,13 +1082,13 @@ function PurchasesPage() {
         <div className="flex gap-2">
           <button
             onClick={() => toast.success("Purchase report exported")}
-            className="h-9 px-3 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm"
+            className="h-9 px-3 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm cursor-pointer"
           >
             <Download className="size-3.5" /> Export Logs
           </button>
           <button
             onClick={() => setIsAdding(true)}
-            className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity"
+            className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold inline-flex items-center gap-1.5 hover:opacity-90 shadow transition-opacity cursor-pointer"
           >
             <Plus className="size-3.5" /> Record Purchase
           </button>
@@ -1016,11 +1129,24 @@ function PurchasesPage() {
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Filter Supplier:</span>
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Status:</span>
+            <select
+              value={paymentStatusFilter}
+              onChange={(e) => setPaymentStatusFilter(e.target.value as any)}
+              className="h-9 min-w-[130px] rounded-md border border-border bg-surface px-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring/20 cursor-pointer"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Paid">Paid</option>
+              <option value="Partial Paid">Partial Paid</option>
+              <option value="Not Paid">Not Paid</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Supplier:</span>
             <select
               value={selectedSupplierTab}
               onChange={(e) => setSelectedSupplierTab(e.target.value)}
-              className="h-9 min-w-[170px] rounded-md border border-border bg-surface px-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring/20 cursor-pointer"
+              className="h-9 min-w-[160px] rounded-md border border-border bg-surface px-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring/20 cursor-pointer"
             >
               <option value="All">All Suppliers ({combinedSuppliersList.length})</option>
               {combinedSuppliersList.map((s) => (
@@ -1047,15 +1173,16 @@ function PurchasesPage() {
                 <th className="py-2.5 px-3 font-semibold">Invoice No</th>
                 <th className="py-2.5 px-3 text-center font-semibold">Qty</th>
                 <th className="py-2.5 px-3 font-semibold text-right">Total Cost</th>
-                <th className="py-2.5 px-3 font-semibold">Payment Details</th>
+                <th className="py-2.5 px-3 font-semibold">Paid / Due</th>
+                <th className="py-2.5 px-3 font-semibold">Payment Status</th>
                 <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {sortedPurchases.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-muted-foreground font-semibold">
-                    No purchases found for selected criteria.
+                  <td colSpan={9} className="py-10 text-center text-muted-foreground font-semibold">
+                    No purchase orders found for selected criteria.
                   </td>
                 </tr>
               ) : (
@@ -1063,7 +1190,11 @@ function PurchasesPage() {
                   const sup = combinedSuppliersList.find(
                     (s) => s.id === p.supplierId || String(s.name || "").trim().toLowerCase() === (p.supplierName || "").trim().toLowerCase()
                   );
+                  const pStat = p.paymentStatus || (p.status === "Paid" ? "Paid" : p.status === "Partial Paid" ? "Partial Paid" : "Not Paid");
+                  const paidAmt = p.amountPaid !== undefined ? p.amountPaid : (pStat === "Paid" ? p.amount : 0);
+                  const dueAmt = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.amount - paidAmt);
                   const modeText = p.paymentMode ? ` (${p.paymentMode})` : "";
+
                   return (
                     <tr key={p.id} className="border-b border-border hover:bg-accent/30 transition-colors last:border-0">
                       <td className="py-3 px-3 font-mono font-medium text-muted-foreground">{p.id}</td>
@@ -1075,16 +1206,26 @@ function PurchasesPage() {
                       <td className="py-3 px-3 text-center font-bold text-sm">{p.quantity}</td>
                       <td className="py-3 px-3 text-right font-bold text-foreground">{formatInr(p.amount)}</td>
                       <td className="py-3 px-3">
+                        <div className="space-y-0.5 text-[11px]">
+                          <div className="text-emerald-600 dark:text-emerald-400 font-semibold">Paid: {formatInr(paidAmt)}</div>
+                          {dueAmt > 0 ? (
+                            <div className="text-rose-600 dark:text-rose-400 font-semibold">Due: {formatInr(dueAmt)}</div>
+                          ) : (
+                            <div className="text-muted-foreground text-[10px]">Fully Settled</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Badge tone={p.status === "Paid" ? "success" : "warning"}>
-                            {p.status}{p.status === "Paid" ? modeText : ""}
+                          <Badge tone={pStat === "Paid" ? "success" : pStat === "Partial Paid" ? "info" : "danger"}>
+                            {pStat}{pStat === "Paid" ? modeText : ""}
                           </Badge>
-                          {p.status === "Outstanding" && sup && (
+                          {dueAmt > 0 && (
                             <button
-                              onClick={() => setPayingSupplier(sup)}
-                              className="h-6 px-2.5 rounded border border-primary/20 bg-primary/5 text-primary hover:bg-primary hover:text-white transition-colors text-[10px] font-bold shadow-sm cursor-pointer"
+                              onClick={() => setPayingPurchase(p)}
+                              className="h-6 px-2 rounded border border-primary/20 bg-primary/5 text-primary hover:bg-primary hover:text-white transition-colors text-[10px] font-bold shadow-sm cursor-pointer whitespace-nowrap"
                             >
-                              Pay Supplier
+                              Pay Balance
                             </button>
                           )}
                         </div>

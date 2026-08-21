@@ -58,6 +58,7 @@ export function CashFlowDashboard() {
   const fPayments = useStore((s) => s.payments);
   const fExpenses = useStore((s) => s.expenses);
   const fInvestments = useStore((s) => s.investments);
+  const fProfitTxns = useStore((s) => s.profitTransactions) || [];
 
   // Mobiles store
   const mSales = useMobileStore((s) => s.sales);
@@ -225,6 +226,46 @@ export function CashFlowDashboard() {
             description: `Capital deployed by investor: ${i.investor}`,
             amount: amt,
             method: i.method === "Cash" ? "Cash" : "UPI",
+          });
+        }
+      }
+    });
+
+    // Profit Withdrawals & Redeposits
+    fProfitTxns.forEach((tx) => {
+      const amt = tx.amount;
+      if (amt > 0) {
+        const dObj = parseAppDate(tx.date);
+        const type = tx.type === "Withdrawal" ? "Outflow" : "Inflow";
+        const cat = tx.type === "Withdrawal" ? "Profit Withdrawal" : "Profit Redeposit";
+        const desc = tx.type === "Withdrawal" ? `Profit withdrawal (${tx.notes || "Owner Distribution"})` : `Redeposit of taken profit (${tx.notes || "Capital Return"})`;
+
+        if (tx.method === "Cash & Bank") {
+          const cashPart = Math.floor(amt / 2);
+          const bankPart = amt - cashPart;
+          if (cashPart > 0) {
+            items.push({
+              id: `F-PTX-${tx.id}-CASH`, date: tx.date, dateObj: dObj, module: "Finance", type,
+              category: cat, description: `${desc} (Cash portion)`, amount: cashPart, method: "Cash",
+            });
+          }
+          if (bankPart > 0) {
+            items.push({
+              id: `F-PTX-${tx.id}-BANK`, date: tx.date, dateObj: dObj, module: "Finance", type,
+              category: cat, description: `${desc} (Bank portion)`, amount: bankPart, method: "UPI",
+            });
+          }
+        } else {
+          items.push({
+            id: `F-PTX-${tx.id}`,
+            date: tx.date,
+            dateObj: dObj,
+            module: "Finance",
+            type,
+            category: cat,
+            description: desc,
+            amount: amt,
+            method: tx.method === "Cash" ? "Cash" : "UPI",
           });
         }
       }

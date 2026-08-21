@@ -117,7 +117,10 @@ export interface MobilePurchase {
   quantity: number;
   amount: number;
   gst: number;
-  status: "Paid" | "Outstanding";
+  status: "Paid" | "Partial Paid" | "Not Paid" | "Outstanding";
+  paymentStatus: "Paid" | "Partial Paid" | "Not Paid";
+  amountPaid: number;
+  dueAmount: number;
   paymentMode?: "Cash" | "UPI" | "Cash & UPI" | "Bank" | "Cash & Bank";
   cashAmount?: number;
   bankAmount?: number;
@@ -281,13 +284,24 @@ interface MobilesState {
     bankAmount?: number
   ) => void;
   
-  recordPurchase: (pur: Omit<MobilePurchase, "id" | "amount" | "gst" | "status"> & {
-    payNow: boolean;
+  recordPurchase: (pur: Omit<MobilePurchase, "id" | "amount" | "gst" | "status" | "paymentStatus" | "amountPaid" | "dueAmount"> & {
+    payNow?: boolean;
+    paymentStatus?: "Paid" | "Partial Paid" | "Not Paid";
+    amountPaid?: number;
     paymentMode?: "Cash" | "UPI" | "Cash & UPI" | "Bank" | "Cash & Bank";
     cashAmount?: number;
     bankAmount?: number;
     paymentRemark?: string;
   }) => MobilePurchase;
+  payPurchaseBalance: (
+    purchaseId: string,
+    amount: number,
+    paymentMode?: "Cash" | "UPI" | "Cash & UPI",
+    cashAmount?: number,
+    bankAmount?: number,
+    remark?: string,
+    date?: string
+  ) => void;
   createBill: (sale: Omit<MobileSale, "id" | "subtotal" | "gst" | "totalAmount" | "paymentStatus" | "amountPaid" | "dueAmount"> & { date?: string; paymentStatus?: MobileSale["paymentStatus"]; amountPaid?: number; dueAmount?: number }) => MobileSale;
   collectSalePayment: (saleId: string, amount: number, paymentMethod: "Cash" | "UPI", date?: string) => void;
   
@@ -382,15 +396,18 @@ function saleRow(s: MobileSale): SheetRow {
   };
 }
 function purchaseRow(p: MobilePurchase): SheetRow {
+  const pStatus = p.paymentStatus || (p.status === "Paid" ? "Paid" : p.status === "Partial Paid" ? "Partial Paid" : "Not Paid");
+  const paid = p.amountPaid !== undefined ? p.amountPaid : (pStatus === "Paid" ? p.amount : 0);
+  const due = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.amount - paid);
   return {
     id: p.id, supplierId: p.supplierId || "", supplierName: p.supplierName, invoiceNo: p.invoiceNo,
-    date: p.date, quantity: p.quantity, amount: p.amount, status: p.status,
+    date: p.date, quantity: p.quantity, amount: p.amount,
+    status: pStatus,
+    paymentStatus: pStatus,
+    amountPaid: paid,
+    dueAmount: due,
     gst: p.gst,
     paymentMode: p.paymentMode || "",
-    // The Cash & UPI portions are captured by the purchase dialog and held in
-    // state, but were never written here — so after a sync the real split was
-    // gone and the cash-flow ledger fell back to halving the total. An uneven
-    // split (₹8,000 cash + ₹3,000 UPI) came back as ₹5,500/₹5,500.
     cashAmount: p.cashAmount ?? "",
     bankAmount: p.bankAmount ?? "",
     paymentRemark: p.paymentRemark || "",
@@ -657,7 +674,27 @@ export const useMobileStore = create<MobilesState>()(
         const id = nextSeqId("MPR-", get().purchases.map((x) => x.id));
         const subtotal = pur.items.reduce((sum, item) => sum + item.quantity * item.cost, 0);
         const total = subtotal;
-        const status = pur.payNow ? "Paid" : "Outstanding";
+
+        let rawStatus: "Paid" | "Partial Paid" | "Not Paid" =
+          pur.paymentStatus || (pur.payNow ? "Paid" : "Not Paid");
+
+        let amountPaid = 0;
+        if (rawStatus === "Paid") {
+          amountPaid = total;
+        } else if (rawStatus === "Partial Paid") {
+          amountPaid = Math.min(total, Math.max(0, Number(pur.amountPaid) || 0));
+          if (amountPaid <= 0) {
+            rawStatus = "Not Paid";
+          } else if (amountPaid >= total) {
+            rawStatus = "Paid";
+          }
+        } else {
+          amountPaid = 0;
+        }
+
+        const dueAmount = Math.max(0, total - amountPaid);
+        const paymentStatus = rawStatus;
+        const status = paymentStatus;
 
         let supplier = get().suppliers.find(
           (s) => s.id === pur.supplierId || (pur.supplierName && s.name.trim().toLowerCase() === pur.supplierName.trim().toLowerCase())
@@ -676,7 +713,10 @@ export const useMobileStore = create<MobilesState>()(
           id,
           amount: total,
           gst: 0,
-          status
+          status,
+          paymentStatus,
+          amountPaid,
+          dueAmount,
         };
 
         // Update inventory quantities & purchase prices
@@ -691,24 +731,27 @@ export const useMobileStore = create<MobilesState>()(
           }));
         });
 
-        // Add to supplier ledger outstanding if not paid, or log immediate supplier payment if paid
-        if (!pur.payNow && supplier) {
+        // Add remaining due amount to supplier ledger outstanding debt
+        if (dueAmount > 0 && supplier) {
           set((state) => ({
             suppliers: state.suppliers.map((s) =>
-              s.id === supplier!.id ? { ...s, outstanding: s.outstanding + total } : s
+              s.id === supplier!.id ? { ...s, outstanding: s.outstanding + dueAmount } : s
             )
           }));
-        } else if (pur.payNow && supplier) {
+        }
+
+        // If upfront payment was made, log SupplierPayment
+        if (amountPaid > 0 && supplier) {
           const pMode = pur.paymentMode || "Cash";
-          const cAmt = pur.cashAmount !== undefined ? pur.cashAmount : pMode === "Cash" ? total : pMode === "Cash & UPI" ? total / 2 : 0;
-          const bAmt = pur.bankAmount !== undefined ? pur.bankAmount : pMode === "UPI" || pMode === "Bank" ? total : pMode === "Cash & UPI" ? total / 2 : 0;
+          const cAmt = pur.cashAmount !== undefined ? pur.cashAmount : pMode === "Cash" ? amountPaid : pMode === "Cash & UPI" ? amountPaid / 2 : 0;
+          const bAmt = pur.bankAmount !== undefined ? pur.bankAmount : pMode === "UPI" || pMode === "Bank" ? amountPaid : pMode === "Cash & UPI" ? amountPaid / 2 : 0;
           const newPayment: SupplierPayment = {
             id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
             supplierId: supplier.id,
             supplierName: supplier.name,
-            amount: total,
+            amount: amountPaid,
             date: pur.date,
-            remark: pur.paymentRemark || `Immediate payment for Purchase Bill ${pur.invoiceNo} (${pMode})`,
+            remark: pur.paymentRemark || `${paymentStatus} payment for Purchase Bill ${pur.invoiceNo} (${pMode})`,
             paymentMode: pMode,
             cashAmount: cAmt,
             bankAmount: bAmt,
@@ -723,24 +766,81 @@ export const useMobileStore = create<MobilesState>()(
         }));
 
         syncUpsert(get, "Mobiles_Purchases", purchaseRow(newPurchase), "purchase");
-        // adjustStock() above can flip a product's status (e.g. Out of Stock
-        // -> In Stock) — sync each affected product row so that change isn't
-        // silently lost now that this action no longer does a full-table sync.
+        
         pur.items.forEach((item) => {
           const updatedProduct = get().products.find((p) => p.id === item.productId);
           if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product (from purchase)");
         });
+
         if (supplier) {
-          // Covers both an auto-created supplier and an outstanding-balance
-          // update — by now the store holds the final state for either case.
           const finalSupplier = get().suppliers.find((s) => s.id === supplier!.id);
           if (finalSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(finalSupplier), "supplier (from purchase)");
-          if (pur.payNow) {
+          if (amountPaid > 0) {
             const latestPayment = get().supplierPayments?.[0];
             if (latestPayment) syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(latestPayment), "supplier payment (from purchase)");
           }
         }
         return newPurchase;
+      },
+
+      payPurchaseBalance: (purchaseId, amount, paymentMode = "Cash", cashAmount, bankAmount, remark, date) => {
+        const purchase = get().purchases.find((p) => p.id === purchaseId);
+        if (!purchase) return;
+
+        const currentPaid = purchase.amountPaid !== undefined ? purchase.amountPaid : (purchase.status === "Paid" ? purchase.amount : 0);
+        const currentDue = purchase.dueAmount !== undefined ? purchase.dueAmount : Math.max(0, purchase.amount - currentPaid);
+
+        if (currentDue <= 0) return;
+
+        const payAmt = Math.min(amount, currentDue);
+        const newAmountPaid = currentPaid + payAmt;
+        const newDueAmount = Math.max(0, purchase.amount - newAmountPaid);
+        const newPaymentStatus: "Paid" | "Partial Paid" | "Not Paid" = newDueAmount <= 0 ? "Paid" : "Partial Paid";
+        const formattedDate = date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+        const updatedPurchase: MobilePurchase = {
+          ...purchase,
+          amountPaid: newAmountPaid,
+          dueAmount: newDueAmount,
+          status: newPaymentStatus,
+          paymentStatus: newPaymentStatus,
+        };
+
+        const supplier = get().suppliers.find((s) => s.id === purchase.supplierId || s.name.trim().toLowerCase() === (purchase.supplierName || "").trim().toLowerCase());
+        if (supplier) {
+          set((state) => ({
+            suppliers: state.suppliers.map((s) =>
+              s.id === supplier.id ? { ...s, outstanding: Math.max(0, s.outstanding - payAmt) } : s
+            )
+          }));
+        }
+
+        const cAmt = cashAmount !== undefined ? cashAmount : paymentMode === "Cash" ? payAmt : paymentMode === "Cash & UPI" ? payAmt / 2 : 0;
+        const bAmt = bankAmount !== undefined ? bankAmount : paymentMode === "UPI" || paymentMode === "Bank" ? payAmt : paymentMode === "Cash & UPI" ? payAmt / 2 : 0;
+        
+        const newPayment: SupplierPayment = {
+          id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
+          supplierId: supplier ? supplier.id : purchase.supplierId,
+          supplierName: supplier ? supplier.name : purchase.supplierName,
+          amount: payAmt,
+          date: formattedDate,
+          remark: remark || `Payment of ₹${payAmt.toLocaleString("en-IN")} towards Purchase Invoice #${purchase.invoiceNo}`,
+          paymentMode,
+          cashAmount: cAmt,
+          bankAmount: bAmt,
+        };
+
+        set((state) => ({
+          purchases: state.purchases.map((p) => (p.id === purchaseId ? updatedPurchase : p)),
+          supplierPayments: [newPayment, ...(state.supplierPayments || [])]
+        }));
+
+        syncUpsert(get, "Mobiles_Purchases", purchaseRow(updatedPurchase), "purchase balance payment");
+        if (supplier) {
+          const updatedSup = get().suppliers.find((s) => s.id === supplier.id);
+          if (updatedSup) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSup), "supplier balance update");
+        }
+        syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment log");
       },
 
       createBill: (saleInput) => {
@@ -1119,11 +1219,25 @@ export const useMobileStore = create<MobilesState>()(
               : mode === "UPI" || mode === "Bank" ? "UPI"
               : mode === "Cash & UPI" || mode === "Cash & Bank" ? "Cash & UPI"
               : r.paymentMode || undefined;
+            const amt = Number(r.amount) || 0;
+            const rawPStatus = r.paymentStatus || r.status;
+            const normalizedPStatus: "Paid" | "Partial Paid" | "Not Paid" =
+              rawPStatus === "Paid" ? "Paid"
+              : rawPStatus === "Partial Paid" ? "Partial Paid"
+              : "Not Paid";
+
+            const amtPaid = r.amountPaid !== undefined && r.amountPaid !== "" ? Number(r.amountPaid) : (normalizedPStatus === "Paid" ? amt : 0);
+            const dueAmt = r.dueAmount !== undefined && r.dueAmount !== "" ? Number(r.dueAmount) : Math.max(0, amt - amtPaid);
+
             return {
               ...r,
-              amount: Number(r.amount) || 0,
+              amount: amt,
               quantity: Number(r.quantity) || 0,
               gst: Number(r.gst) || 0,
+              status: normalizedPStatus,
+              paymentStatus: normalizedPStatus,
+              amountPaid: amtPaid,
+              dueAmount: dueAmt,
               paymentMode: normalizedMode,
               cashAmount: toOptionalNumber(r.cashAmount),
               bankAmount: toOptionalNumber(r.bankAmount),
