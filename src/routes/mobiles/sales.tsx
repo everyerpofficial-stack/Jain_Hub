@@ -165,7 +165,7 @@ function SalesPage() {
     }
 
     const itemRowsHtml = safeItems(sale?.items)
-      .map((item: any) => {
+      .map((item: any, idx: number) => {
         if (!item) return "";
         const brand = escapeHtml(item.brand || (item.productName ? String(item.productName).split(" ")[0] : "—"));
         const pName = escapeHtml(item.productName || item.name || "—");
@@ -175,15 +175,16 @@ function SalesPage() {
         const price = Number(item.price) || 0;
         return `
         <tr style="background: #ffffff;">
-          <td style="padding: 8px 10px; border: 1px solid #bfdbfe; vertical-align: top; width: 55%;">
-            <div style="margin-bottom: 3px;"><strong style="color: #1e3a8a;">Company:</strong> ${brand}</div>
-            <div style="margin-bottom: 3px;"><strong style="color: #1e3a8a;">Model No.:</strong> ${pName}</div>
-            <div style="margin-bottom: 3px;"><strong style="color: #1e3a8a;">IMEI No.:</strong> ${imei1}</div>
-            <div><strong style="color: #1e3a8a;">IMEI No.:</strong> ${imei2}</div>
+          <td style="padding: 10px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: #1e293b; vertical-align: top;">${idx + 1}</td>
+          <td style="padding: 10px 12px; border: 1px solid #e2e8f0; vertical-align: top;">
+            <div style="margin-bottom: 3px; font-size: 13px;"><strong style="color: #0f172a; width: 100px; display: inline-block;">Company</strong>: ${brand}</div>
+            <div style="margin-bottom: 3px; font-size: 13px;"><strong style="color: #0f172a; width: 100px; display: inline-block;">Model No.</strong>: ${pName}</div>
+            <div style="margin-bottom: 3px; font-size: 13px;"><strong style="color: #0f172a; width: 100px; display: inline-block;">IMEI No.</strong>: ${imei1}</div>
+            <div style="font-size: 13px;"><strong style="color: #0f172a; width: 100px; display: inline-block;">IMEI No.</strong>: ${imei2}</div>
           </td>
-          <td style="padding: 8px; border: 1px solid #bfdbfe; text-align: center; font-weight: 700; width: 10%; vertical-align: top; color: #1e293b;">${qty}</td>
-          <td style="padding: 8px; border: 1px solid #bfdbfe; text-align: right; font-weight: 600; width: 17.5%; vertical-align: top; color: #1e293b;">₹${price.toLocaleString("en-IN")}</td>
-          <td style="padding: 8px; border: 1px solid #bfdbfe; text-align: right; font-weight: 700; width: 17.5%; vertical-align: top; color: #1e3a8a;">₹${(price * qty).toLocaleString("en-IN")}</td>
+          <td style="padding: 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; font-size: 14px; vertical-align: top; color: #1e293b;">${qty}</td>
+          <td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: 600; font-size: 13px; vertical-align: top; color: #1e293b;">₹${price.toLocaleString("en-IN")}</td>
+          <td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: 700; font-size: 14px; vertical-align: top; color: #0f172a;">₹${(price * qty).toLocaleString("en-IN")}</td>
         </tr>
       `;
       })
@@ -194,12 +195,13 @@ function SalesPage() {
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>Receipt - Jain Mobile Gallery</title>
+        <title>Invoice - Jain Mobile</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Hindi&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Hindi&family=Inter:wght@400;500;600;700;800&family=Great+Vibes&display=swap" rel="stylesheet">
         <style>
           * {
+            box-sizing: border-box;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
             color-adjust: exact !important;
@@ -207,215 +209,587 @@ function SalesPage() {
           @media print {
             body { margin: 0; padding: 0; background: white; }
             .no-print { display: none !important; }
+            .bill-container { border: 1.5px solid #d4af37 !important; box-shadow: none !important; }
           }
           body {
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 16px;
             background: #f8fafc;
             color: #0f172a;
           }
           .bill-container {
-            max-width: 720px;
+            max-width: 780px;
             margin: 0 auto;
-            background: #fff;
-            border: 2.5px solid #1e3a8a;
-            border-radius: 10px;
-            padding: 18px;
-            box-sizing: border-box;
-            box-shadow: 0 4px 20px rgba(30, 58, 138, 0.08);
+            background: #ffffff;
+            border: 1.5px solid #d4af37;
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+            position: relative;
+            overflow: hidden;
           }
-          .top-header {
+
+          /* Header Section */
+          .header-wrapper {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            font-size: 13px;
-            font-weight: 700;
-            padding-bottom: 6px;
-            border-bottom: 2px solid #2563eb;
-            margin-bottom: 8px;
+            align-items: flex-start;
+            position: relative;
+            margin-bottom: 12px;
           }
-          .header-left {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: #e1306c;
+          
+          /* Dark Curve Top Left Header */
+          .logo-dark-curve {
+            background: #09090d;
+            border-radius: 0 0 120px 0;
+            padding: 14px 45px 18px 20px;
+            margin-top: -16px;
+            margin-left: -16px;
+            position: relative;
+            border-bottom: 3px solid #d4af37;
+            border-right: 3px solid #d4af37;
+            box-shadow: 2px 4px 12px rgba(0,0,0,0.2);
           }
-          .header-right {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: #15803d;
+          .logo-dark-curve img {
+            height: 68px;
+            width: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 8px rgba(212,175,55,0.3));
           }
-          .shop-title-section {
+
+          /* Center Title */
+          .title-area {
             text-align: center;
-            margin: 6px 0 10px 0;
-            background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
-            padding: 10px 8px;
-            border-radius: 8px;
-            border: 1px solid #dbeafe;
+            flex: 1;
+            padding: 0 10px;
           }
-          .shop-name-hindi {
-            font-family: 'Tiro Devanagari Hindi', 'Rozha One', 'Mangal', serif;
-            font-size: 34px;
+          .shop-title {
+            font-family: 'Tiro Devanagari Hindi', 'Rozha One', serif;
+            font-size: 32px;
             font-weight: 800;
             margin: 0;
+            color: #09090d;
             letter-spacing: 0.5px;
-            color: #1e3a8a;
-            line-height: 1.15;
+            line-height: 1.1;
           }
-          .shop-address-hindi {
-            font-family: 'Tiro Devanagari Hindi', 'Mangal', serif;
+          .title-flourish {
+            color: #d4af37;
             font-size: 14px;
-            font-weight: 700;
-            margin: 4px 0 0 0;
-            color: #b45309;
+            margin: 2px 0;
           }
-          .info-table {
-            width: 100%;
-            border-collapse: collapse;
-            border: 1.5px solid #2563eb;
+          .address-line {
+            font-family: 'Tiro Devanagari Hindi', serif;
             font-size: 13px;
-            margin-bottom: -1.5px;
-            background: #f8fafc;
+            font-weight: 700;
+            color: #a17316;
+            margin: 2px 0 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
           }
-          .info-table td {
-            border: 1px solid #bfdbfe;
-            padding: 7px 10px;
-            vertical-align: middle;
+
+          /* Right Contacts Box */
+          .contacts-box {
+            text-align: right;
+            font-size: 12px;
+            font-weight: 600;
+            color: #1e293b;
+            padding-top: 4px;
+          }
+          .insta-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #09090d;
+            font-weight: 700;
+            margin-bottom: 6px;
+            text-decoration: none;
+            background: #fafaf5;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #e5c158;
+          }
+          .phone-num {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+            color: #1e293b;
+            margin-top: 2px;
+            font-weight: 700;
+          }
+
+          /* Tax Invoice Pill Header */
+          .pill-header {
+            text-align: center;
+            margin: 10px 0 14px 0;
+          }
+          .pill-badge {
+            background: #09090d;
+            border: 1.5px solid #d4af37;
+            color: #f5d77f;
+            padding: 6px 32px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            display: inline-block;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          }
+
+          /* Customer Info Card */
+          .cust-card {
+            border: 1.5px solid #e5c158;
+            border-radius: 12px;
+            background: #fafaf5;
+            padding: 12px 16px;
+            margin-bottom: 14px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            position: relative;
+          }
+          .cust-left {
+            border-right: 1px solid #e5c158;
+            padding-right: 16px;
+          }
+          .cust-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 13px;
             color: #1e293b;
           }
-          .info-table td strong {
-            color: #1e3a8a;
+          .cust-row:last-child {
+            margin-bottom: 0;
           }
+          .icon-badge {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            border: 1px solid #d4af37;
+            background: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #b45309;
+            font-size: 12px;
+            flex-shrink: 0;
+          }
+
+          /* Table Styling */
           .particulars-table {
             width: 100%;
             border-collapse: collapse;
-            border: 1.5px solid #2563eb;
-            font-size: 13px;
+            border: 1.5px solid #09090d;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 14px;
           }
           .particulars-table th {
-            border: 1px solid #1e3a8a;
-            padding: 8px;
-            background: #1e40af !important;
-            font-weight: 800;
-            text-align: center;
+            background: #09090d !important;
             color: #ffffff !important;
+            font-weight: 800;
+            font-size: 11.5px;
+            letter-spacing: 0.5px;
+            padding: 10px 8px;
+            text-align: center;
+            border-right: 1px solid #334155;
           }
-          .terms-box {
-            border: 1.5px solid #d97706;
-            border-top: none;
-            padding: 10px 12px;
-            font-size: 11px;
-            line-height: 1.45;
-            font-family: 'Tiro Devanagari Hindi', 'Mangal', sans-serif;
-            background: #fffbeb !important;
-            color: #78350f;
+          .particulars-table th:last-child {
+            border-right: none;
           }
-          .terms-header {
+          .particulars-table td {
+            border-right: 1px solid #e2e8f0;
+          }
+          .total-row-label {
+            text-align: right;
+            padding: 10px 14px;
+            font-weight: 800;
+            font-size: 13px;
+            color: #09090d;
+            letter-spacing: 1px;
+            border-top: 1.5px solid #09090d;
+          }
+          .total-amount-box {
+            background: #d4af37 !important;
+            color: #ffffff !important;
+            text-align: right;
+            padding: 10px 14px;
+            font-size: 16px;
+            font-weight: 800;
+            border-top: 1.5px solid #09090d;
+          }
+
+          /* Terms Box */
+          .terms-container {
+            border: 1.5px solid #e5c158;
+            border-radius: 12px;
+            background: #ffffff;
+            padding: 10px 14px;
+            margin-top: 14px;
+            position: relative;
+          }
+          .terms-header-pill {
+            text-align: center;
+            margin-top: -20px;
+            margin-bottom: 8px;
+          }
+          .terms-header-pill span {
+            background: #fffdf5;
+            border: 1.5px solid #d4af37;
+            padding: 3px 20px;
+            border-radius: 16px;
             font-weight: 800;
             font-size: 12px;
-            margin-bottom: 3px;
-            color: #b45309;
+            color: #855700;
+            font-family: 'Tiro Devanagari Hindi', serif;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
           }
-          .terms-subtext {
-            margin-top: 8px;
-            font-weight: 700;
+          .terms-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px 16px;
+            font-family: 'Tiro Devanagari Hindi', 'Mangal', sans-serif;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #334155;
+          }
+          .term-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+          }
+          .num-badge {
+            background: #d4af37;
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 10px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-top: 2px;
+          }
+
+          /* Declaration Pill */
+          .declaration-pill {
+            text-align: center;
+            margin: 12px 0 10px 0;
+          }
+          .declaration-pill span {
+            border: 1px solid #d4af37;
+            background: #fffdf5;
+            padding: 4px 20px;
+            border-radius: 20px;
             font-size: 11.5px;
-            color: #1e3a8a;
+            font-weight: 700;
+            color: #0f172a;
+            font-family: 'Tiro Devanagari Hindi', serif;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
           }
-          .signatures-row {
+
+          /* Signatures Row */
+          .signatures-container {
             display: flex;
             justify-content: space-between;
             align-items: flex-end;
-            margin-top: 30px;
+            margin-top: 24px;
             padding: 0 10px;
-            font-size: 13px;
+            font-family: 'Tiro Devanagari Hindi', serif;
+            font-size: 12px;
+          }
+          .sig-left, .sig-right {
+            text-align: center;
             font-weight: 700;
-            font-family: 'Tiro Devanagari Hindi', 'Mangal', sans-serif;
-            color: #1e3a8a;
+            color: #09090d;
+          }
+          .sig-line {
+            border-bottom: 1px stroke #94a3b8;
+            border-style: dotted;
+            width: 160px;
+            margin-bottom: 6px;
+          }
+          .thankyou-center {
+            text-align: center;
+          }
+          .thankyou-title {
+            font-size: 18px;
+            font-weight: 800;
+            color: #09090d;
+            margin: 0;
+          }
+          .thankyou-sub {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 2px;
+          }
+
+          /* Dark Footer Bar */
+          .dark-footer-bar {
+            background: #09090d;
+            border-radius: 0 0 10px 10px;
+            color: #ffffff;
+            padding: 10px 16px;
+            margin: 16px -16px -16px -16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10.5px;
+          }
+          .footer-feat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-right: 1px solid #334155;
+            padding-right: 12px;
+          }
+          .footer-feat:last-of-type {
+            border-right: none;
+          }
+          .footer-feat-title {
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 0.5px;
+          }
+          .footer-feat-sub {
+            color: #94a3b8;
+            font-size: 9.5px;
+          }
+          .ribbon-badge {
+            background: #d4af37;
+            color: #09090d;
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-weight: 800;
+            text-align: center;
+            line-height: 1.1;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+          }
+
+          .visit-again {
+            text-align: center;
+            font-family: 'Great Vibes', 'Brush Script MT', cursive;
+            font-size: 20px;
+            color: #d4af37;
+            margin-top: 10px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+          }
+          .visit-again::before, .visit-again::after {
+            content: '';
+            height: 1px;
+            width: 80px;
+            background: #d4af37;
           }
         </style>
       </head>
       <body>
         <div class="bill-container">
           
-          <!-- Top Contact Bar -->
-          <div class="top-header">
-            <div class="header-left">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
-              <span>Jain__Mobiles</span>
+          <!-- Header Wrapper -->
+          <div class="header-wrapper">
+            <!-- Left Logo Dark Curve -->
+            <div class="logo-dark-curve">
+              <img src="${JAIN_LOGO_BASE64}" alt="Jain Logo" />
             </div>
-            <div class="header-right">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-              <span>मो.: 9669410999, 8839766477</span>
+
+            <!-- Center Title (Removed "गैलरी" as requested!) -->
+            <div class="title-area">
+              <h1 class="shop-title">जैन मोबाईल</h1>
+              <div class="title-flourish">❖ ─── ❖ ─── ❖</div>
+              <div class="address-line">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span>बामंदी रोड, बस स्टैण्ड, बलकवाड़ा</span>
+              </div>
+            </div>
+
+            <!-- Right Contacts -->
+            <div class="contacts-box">
+              <div>
+                <span class="insta-link">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                  Jain__Mobiles
+                </span>
+              </div>
+              <div class="phone-num">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                9669410999
+              </div>
+              <div class="phone-num">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                8839766477
+              </div>
             </div>
           </div>
 
-          <!-- Shop Title Section -->
-          <div class="shop-title-section">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 14px;">
-              <img src="${JAIN_LOGO_BASE64}" alt="Jain Logo" style="height: 56px; width: auto; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));" />
-              <h1 class="shop-name-hindi">जैन मोबाईल गैलरी</h1>
-            </div>
-            <p class="shop-address-hindi">बामंदी रोड, बस स्टेण्ड, बलकवाड़ा</p>
+          <!-- Tax Invoice Pill Header -->
+          <div class="pill-header">
+            <div class="pill-badge">TAX INVOICE / BILL</div>
           </div>
 
-          <!-- Customer Info Sub-Table -->
-          <table class="info-table">
-            <tr>
-              <td style="width: 65%;"><strong>M/s.</strong> ${sale.customerName}</td>
-              <td style="width: 35%;"><strong>No.</strong> <span style="font-weight: 700; color: #1e40af;">${sale.id}</span></td>
-            </tr>
-            <tr>
-              <td><strong>Address</strong> ${sale.village || "—"}</td>
-              <td><strong>Date :</strong> ${sale.date}</td>
-            </tr>
-            <tr>
-              <td colspan="2"><strong>Mob.No.</strong> ${sale.customerMobile}</td>
-            </tr>
-          </table>
+          <!-- Customer Info Card -->
+          <div class="cust-card">
+            <!-- Customer Details (Left) -->
+            <div class="cust-left">
+              <div class="cust-row">
+                <div class="icon-badge">👤</div>
+                <div><strong>M/s.</strong> &nbsp;${escapeHtml(sale.customerName)}</div>
+              </div>
+              <div class="cust-row">
+                <div class="icon-badge">🏠</div>
+                <div><strong>Address</strong> &nbsp;${escapeHtml(sale.village || "—")}</div>
+              </div>
+              <div class="cust-row">
+                <div class="icon-badge">📞</div>
+                <div><strong>Mob.No.</strong> &nbsp;${escapeHtml(sale.customerMobile)}</div>
+              </div>
+            </div>
 
-          <!-- Particulars Table -->
+            <!-- Invoice Details (Right) -->
+            <div>
+              <div class="cust-row">
+                <div class="icon-badge">📄</div>
+                <div><strong>Invoice No.</strong> &nbsp;<span style="font-weight: 800; color: #09090d;">${escapeHtml(sale.id)}</span></div>
+              </div>
+              <div class="cust-row">
+                <div class="icon-badge">📅</div>
+                <div><strong>Date</strong> &nbsp;${escapeHtml(sale.date)}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Particulars Items Table -->
           <table class="particulars-table">
             <thead>
               <tr>
-                <th style="width: 55%;">Particulars</th>
-                <th style="width: 10%;">Qty.</th>
-                <th style="width: 17.5%;">Rate</th>
-                <th style="width: 17.5%;">Amount</th>
+                <th style="width: 8%;">SR. NO.</th>
+                <th style="width: 48%;">PARTICULARS</th>
+                <th style="width: 12%;">QTY.</th>
+                <th style="width: 16%;">RATE</th>
+                <th style="width: 16%;">AMOUNT</th>
               </tr>
             </thead>
             <tbody>
               ${itemRowsHtml}
-              <tr style="font-weight: 800; font-size: 14px; background: #eff6ff !important;">
-                <td colspan="3" style="text-align: right; padding: 8px 12px; border: 1.5px solid #2563eb; color: #1e3a8a;">TOTAL</td>
-                <td style="text-align: right; padding: 8px 12px; font-size: 16px; border: 1.5px solid #2563eb; color: #16a34a; font-weight: 800;">₹${(Number(sale?.totalAmount) || 0).toLocaleString("en-IN")}</td>
+              <tr>
+                <td colspan="4" class="total-row-label">TOTAL</td>
+                <td class="total-amount-box">₹${(Number(sale?.totalAmount) || 0).toLocaleString("en-IN")}</td>
               </tr>
             </tbody>
           </table>
 
           <!-- Terms & Conditions Box (Hindi Script) -->
-          <div class="terms-box">
-            <div class="terms-header">नियम एवं शर्तें:-</div>
-            <div>
-              1). बेचा हुआ माल वापस नही होगा । 
-              2). हम विक्रेता है निर्माता नही 
-              3). मोबाईल फोन में सर्विस वारंटी 1 वर्ष की कम्पनी की ओर से रहती है 
-              4). पानी में भीगे हुए, नीचे गिरे हुए अथवा मेकेनिक द्वारा छेड़े गये हुए मोबाईल की कोई वारंटी मान्य नही होगी 
-              5). मोबाईल फोन की सर्विस के लिए 20 से 45 दिन लगेगें 
-              6). हेडफोन की कोई वारंटी नही रहेगी 
-              7). मोबाईल या किसी भी इलेक्टानिक सामान खराब होने पर ग्राहक को स्वयं मोबाईल सर्विस सेन्टर ले जाना होगा । 
-              8). किसी भी प्रकार का चाइना आइटम खरीदने से पहले एक बार सोच ले दुकान से नीचे उतरने के बाद हमारी कोई गारंटी नहीं रहेगी । 
-              9). भूल-चुक लेनी देनी ।
+          <div class="terms-container">
+            <div class="terms-header-pill">
+              <span>नियम एवं शर्तें :-</span>
             </div>
-            <div class="terms-subtext">उपरोक्त सामग्री सही/चालु स्थिति में प्राप्त हुई ।</div>
+            <div class="terms-grid">
+              <div class="term-item">
+                <div class="num-badge">1</div>
+                <div>बेचा हुआ माल वापस नहीं होगा।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">6</div>
+                <div>हेडफोन की कोई वारंटी नहीं होगी।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">2</div>
+                <div>हम विक्रेता है निर्माता नहीं।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">7</div>
+                <div>मोबाईल या किसी भी इलेक्ट्रॉनिक सामान खराब होने पर ग्राहक को स्वयं मोबाईल सर्विस सेंटर ले जाना होगा।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">3</div>
+                <div>मोबाईल फोन में सर्विस वारंटी 1 वर्ष की कंपनी की ओर से रहती है।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">8</div>
+                <div>किसी भी प्रकार का चार्ज आइटम खरीदने से पहले एक बार सोच ले दुकान से नीचे उतरने के बाद हमारी कोई गारंटी नहीं रहेगी।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">4</div>
+                <div>पानी में भीगी हुए, नीचे गिरें हुए अथवा मैकेनिक द्वारा छेड़े गये हुए मोबाईल की कोई वारंटी मान्य नहीं होगी।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">9</div>
+                <div>भूल-चुक लेनी देनी।</div>
+              </div>
+              <div class="term-item">
+                <div class="num-badge">5</div>
+                <div>मोबाईल फोन की सर्विस के लिए 20 से 45 दिन लगेंगे।</div>
+              </div>
+            </div>
           </div>
 
-          <!-- Signatures -->
-          <div class="signatures-row">
-            <div>ग्राहक के हस्ताक्षर</div>
-            <div>फॉर- जैन मोबाईल गैलरी</div>
+          <!-- Declaration Pill -->
+          <div class="declaration-pill">
+            <span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+              उपरोक्त सामग्री सही/चालू स्थिति में प्राप्त हुई ।
+            </span>
+          </div>
+
+          <!-- Signatures (Removed "गैलरी" as requested!) -->
+          <div class="signatures-container">
+            <div class="sig-left">
+              <div class="sig-line"></div>
+              <div>ग्राहक के हस्ताक्षर</div>
+            </div>
+            <div class="thankyou-center">
+              <div class="thankyou-title">धन्यवाद !</div>
+              <div class="thankyou-sub">आपकी संतुष्टि, हमारी प्राथमिकता</div>
+            </div>
+            <div class="sig-right">
+              <div class="sig-line"></div>
+              <div>फ़ॉर- जैन मोबाईल</div>
+            </div>
+          </div>
+
+          <!-- Dark Footer Bar -->
+          <div class="dark-footer-bar">
+            <div class="footer-feat">
+              <span style="font-size: 14px;">👤</span>
+              <div>
+                <div class="footer-feat-title">BEST PRODUCTS</div>
+                <div class="footer-feat-sub">100% Original</div>
+              </div>
+            </div>
+            <div class="footer-feat">
+              <span style="font-size: 14px;">😃</span>
+              <div>
+                <div class="footer-feat-title">CUSTOMER SATISFACTION</div>
+                <div class="footer-feat-sub">Our First Priority</div>
+              </div>
+            </div>
+            <div class="footer-feat">
+              <span style="font-size: 14px;">🎧</span>
+              <div>
+                <div class="footer-feat-title">AFTER SALES SUPPORT</div>
+                <div class="footer-feat-sub">Always Here For You</div>
+              </div>
+            </div>
+            <div class="ribbon-badge">
+              THANK YOU
+            </div>
+          </div>
+
+          <!-- Visit Again Cursive -->
+          <div class="visit-again">
+            Visit Again!
           </div>
 
         </div>

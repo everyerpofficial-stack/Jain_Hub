@@ -2,7 +2,20 @@ import { useState, useEffect, useRef } from "react";
 import { useStore } from "@/lib/store";
 import { useMobileStore } from "@/lib/mobileStore";
 import { toast } from "sonner";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { 
+  ArrowLeft, 
+  RefreshCw, 
+  Mail, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  SendHorizontal, 
+  Phone, 
+  ShieldCheck, 
+  Clock, 
+  Headphones, 
+  KeyRound 
+} from "lucide-react";
 import { checkLoginRateLimit, recordLoginFailure, clearLoginFailures } from "@/lib/store";
 import { readSheet } from "@/lib/googleSheets";
 import type { Staff } from "@/lib/store";
@@ -59,6 +72,8 @@ export function LoginPage() {
   const loginWithPassword = useStore((s) => s.loginWithPassword);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [step, setStep] = useState<"email" | "otp">("email");
   const [otpVal, setOtpVal] = useState("");
   const [loading, setLoading] = useState(false);
@@ -124,7 +139,6 @@ export function LoginPage() {
       let success = await loginWithPassword(cleanEmail, cleanPass);
 
       // If not matched locally, fast-refresh ONLY the Staff sheet and retry.
-      // This is much faster than loadFromSheets() which fetches all 5 sheets.
       if (!success && sheetsUrl) {
         try {
           await refreshStaffFromSheets();
@@ -138,7 +152,6 @@ export function LoginPage() {
         toast.success("Signed in successfully", {
           description: "Welcome to the Jain Finance & Mobiles Hub",
         });
-        // Background refresh all sheets data without blocking UI
         if (sheetsUrl) {
           useStore.getState().loadFromSheets().catch(() => {});
         }
@@ -155,7 +168,7 @@ export function LoginPage() {
       (s) => s.email.toLowerCase() === cleanEmail && s.status === "Active"
     );
 
-    // If not found locally, fast-refresh ONLY the Staff sheet (not all 5)
+    // If not found locally, fast-refresh ONLY the Staff sheet
     if (!exists && sheetsUrl) {
       try {
         const freshStaff = await refreshStaffFromSheets();
@@ -179,7 +192,7 @@ export function LoginPage() {
       return;
     }
 
-    // Generate OTP using crypto API and store in ref (not state)
+    // Generate OTP using crypto API and store in ref
     const code = generateOtp();
     sentOtpRef.current = code;
     otpExpiryRef.current = Date.now() + OTP_EXPIRY_MS;
@@ -221,7 +234,6 @@ export function LoginPage() {
         description: `Check your registered email or contact admin. (Dev: check console)`,
         duration: 15000,
       });
-      // Only log to console in dev
       if (import.meta.env.DEV) {
         console.info("[DEV ONLY] OTP:", code);
       }
@@ -284,7 +296,6 @@ export function LoginPage() {
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Check OTP expiry
     if (otpExpired || Date.now() > otpExpiryRef.current) {
       toast.error("OTP Expired", {
         description: "Your verification code has expired. Please request a new one.",
@@ -309,9 +320,7 @@ export function LoginPage() {
 
     setLoading(true);
     setTimeout(() => {
-      // Note: 200ms delay provides brief visual feedback via spinner
       if (otpVal === sentOtpRef.current) {
-        // Invalidate OTP after use (one-time use)
         sentOtpRef.current = "";
         otpExpiryRef.current = 0;
         clearLoginFailures(cleanEmail);
@@ -347,102 +356,213 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-start sm:items-center justify-center bg-[#f0f4f8] text-slate-800 font-sans sm:p-4 relative">
-      {/* Centered card container — full-width on mobile, max-w card on sm+ */}
-      <div className="w-full sm:max-w-[420px] bg-white sm:rounded-2xl p-6 sm:p-8 md:p-10 shadow-none sm:shadow-[0_8px_30px_rgb(0,0,0,0.03)] border-0 sm:border sm:border-slate-100/80 flex flex-col text-center min-h-screen sm:min-h-0">
+    <div className="min-h-screen w-full flex flex-col items-center justify-between bg-[#060609] text-slate-100 font-sans p-4 sm:p-6 relative overflow-x-hidden selection:bg-[#c5a059]/30 selection:text-white">
+      {/* Decorative Gold Wave Vector Background Accent - Top Right */}
+      <svg className="absolute top-0 right-0 w-80 sm:w-96 h-80 sm:h-96 opacity-30 pointer-events-none z-0" viewBox="0 0 400 400" fill="none">
+        <path d="M400 0C320 80 280 180 400 300M400 50C350 120 320 200 400 350M400 100C380 160 360 220 400 400" stroke="url(#gold-grad-1)" strokeWidth="1" />
+        <path d="M400 0C260 120 220 260 400 400" stroke="url(#gold-grad-1)" strokeWidth="1.5" strokeDasharray="3 3" />
+        <defs>
+          <linearGradient id="gold-grad-1" x1="400" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#d4af37" stopOpacity="0.8" />
+            <stop offset="1" stopColor="#b8860b" stopOpacity="0.1" />
+          </linearGradient>
+        </defs>
+      </svg>
+
+      {/* Decorative Gold Wave Vector Background Accent - Bottom Left */}
+      <svg className="absolute bottom-0 left-0 w-80 sm:w-96 h-80 sm:h-96 opacity-25 pointer-events-none z-0" viewBox="0 0 400 400" fill="none">
+        <path d="M0 400C80 320 180 280 300 400M50 400C120 350 200 320 350 400M100 400C160 380 220 360 400 400" stroke="url(#gold-grad-2)" strokeWidth="1" />
+        <defs>
+          <linearGradient id="gold-grad-2" x1="0" y1="400" x2="400" y2="200" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#d4af37" stopOpacity="0.8" />
+            <stop offset="1" stopColor="#8b6508" stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+      </svg>
+
+      {/* Top Spacer */}
+      <div className="h-4 sm:h-6" />
+
+      {/* Main Luxury Dark Card Container */}
+      <div className="w-full max-w-[440px] bg-[#0c0c12]/95 backdrop-blur-2xl rounded-2xl p-6 sm:p-8 border border-[#2a2419] shadow-[0_12px_50px_rgba(0,0,0,0.9)] flex flex-col text-center relative z-10 my-auto">
         
-        {/* Standalone Logo — clean, prominent without outer circle */}
-        <div className="flex justify-center mb-6 mt-8 sm:mt-0">
-          <img src="/logo.png" alt="Jain Mobile Logo" className="h-28 sm:h-32 w-auto object-contain drop-shadow-md hover:scale-105 transition-transform duration-300" />
+        {/* Emblem Logo */}
+        <div className="flex justify-center mb-4">
+          <img 
+            src="/logo.png" 
+            alt="Jain Mobile Logo" 
+            className="h-24 sm:h-28 w-auto object-contain drop-shadow-[0_0_20px_rgba(212,175,55,0.2)] hover:scale-105 transition-transform duration-300" 
+          />
         </div>
 
-        {/* Portal Headers */}
+        {/* Header Text */}
         <div className="mb-6">
-          <h1 className="text-xl font-bold tracking-tight text-slate-800 uppercase">Jain Mobile &amp; Finance</h1>
-          <p className="text-[12px] font-medium text-slate-500 mt-1">Management Portal · Secure Sign In</p>
+          <h1 className="text-xl sm:text-2xl font-extrabold tracking-wider text-white uppercase">
+            JAIN MOBILE <span className="text-[#c5a059] font-normal">&amp;</span> FINANCE
+          </h1>
+          <p className="text-xs font-medium text-[#8e8e9e] tracking-wide mt-1">
+            Management Portal • Secure Sign In
+          </p>
         </div>
 
         {step === "email" ? (
           <form onSubmit={handleSendOtp} className="text-left space-y-4" autoComplete="off">
+            {/* EMAIL ADDRESS Field */}
             <div className="space-y-1.5">
-              <label htmlFor="email" className="block text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-                Email Address
+              <label htmlFor="email" className="block text-[11px] font-bold tracking-widest text-[#c5a059] uppercase">
+                EMAIL ADDRESS
               </label>
-              <input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-[#3b82f6] transition-all"
-                required
-                disabled={loading}
-                autoComplete="email"
-              />
+              <div className="flex items-center gap-2.5">
+                <div className="size-10 rounded-full bg-[#181510] border border-[#2d2518] flex items-center justify-center text-[#d4af37] shrink-0">
+                  <Mail className="size-4" />
+                </div>
+                <input
+                  id="email"
+                  type="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-11 flex-1 rounded-xl border border-[#262016] bg-[#08080c] px-3.5 text-sm text-white placeholder:text-[#4a4a58] focus:outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]/30 transition-all"
+                  required
+                  disabled={loading}
+                  autoComplete="email"
+                />
+              </div>
             </div>
 
+            {/* PASSWORD Field */}
             <div className="space-y-1.5">
-              <label htmlFor="pass" className="block text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-                Password (or leave blank for OTP)
+              <label htmlFor="pass" className="block text-[11px] font-bold tracking-widest text-[#c5a059] uppercase">
+                PASSWORD (OR LEAVE BLANK FOR OTP)
               </label>
-              <input
-                id="pass"
-                type="password"
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-[#3b82f6] transition-all"
-                disabled={loading}
-                autoComplete="current-password"
-              />
+              <div className="flex items-center gap-2.5">
+                <div className="size-10 rounded-full bg-[#181510] border border-[#2d2518] flex items-center justify-center text-[#d4af37] shrink-0">
+                  <Lock className="size-4" />
+                </div>
+                <div className="relative flex-1">
+                  <input
+                    id="pass"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Enter password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-[#262016] bg-[#08080c] pl-3.5 pr-10 text-sm text-white placeholder:text-[#4a4a58] focus:outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]/30 transition-all"
+                    disabled={loading}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#71717a] hover:text-[#d4af37] transition-colors p-1"
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
             </div>
 
+            {/* Checkbox and Forgot password row */}
+            <div className="flex items-center justify-between text-xs pt-1">
+              <label className="flex items-center gap-2 text-[#a1a1aa] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="rounded border-[#3a3020] bg-[#08080c] text-[#d4af37] focus:ring-[#d4af37]/30 accent-[#d4af37]"
+                />
+                Remember me
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  toast.info("Password Reset Information", {
+                    description: "Leave the password field blank to log in securely using an email OTP verification code.",
+                  });
+                }}
+                className="text-[#c5a059] hover:text-[#e5c158] transition-colors font-medium cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            </div>
+
+            {/* Primary Action Button */}
             <div className="pt-2">
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full h-11 bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2 active:scale-[0.99] transition-all cursor-pointer shadow-sm shadow-blue-500/10 disabled:opacity-50"
+                className="w-full h-12 bg-gradient-to-r from-[#b8860b] via-[#d4af37] to-[#e5c158] hover:from-[#c59114] hover:to-[#f0d068] text-slate-950 font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(212,175,55,0.25)] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
               >
                 {loading ? (
-                  <RefreshCw className="size-4 animate-spin" />
+                  <RefreshCw className="size-4 animate-spin text-slate-950" />
                 ) : (
-                  "Send Verification Code"
+                  <>
+                    <SendHorizontal className="size-4 text-slate-950" />
+                    Send Verification Code
+                  </>
                 )}
               </button>
             </div>
+
+            {/* Divider OR */}
+            <div className="flex items-center gap-4 my-5">
+              <div className="flex-1 h-px bg-[#242018]" />
+              <span className="text-[11px] font-bold tracking-widest text-[#71717a] uppercase">OR</span>
+              <div className="flex-1 h-px bg-[#242018]" />
+            </div>
+
+            {/* Secondary Action Button */}
+            <button
+              type="button"
+              onClick={() => {
+                toast.info("Mobile Login Mode", {
+                  description: "Enter your registered email above to receive an instant verification code on your device.",
+                });
+              }}
+              className="w-full h-11 rounded-xl border border-[#3d3322] hover:border-[#c5a059] bg-[#12100c]/60 hover:bg-[#1a1712] text-[#d4af37] font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <Phone className="size-4 text-[#d4af37]" />
+              Login with Mobile Number
+            </button>
           </form>
         ) : (
           <form onSubmit={handleVerifyOtp} className="text-left space-y-5" autoComplete="off">
             {otpExpired && (
-              <div className="rounded-lg bg-red-50 border border-red-200 px-3.5 py-2.5 text-sm text-red-700">
-                Your verification code has expired. Please{" "}
-                <button type="button" className="font-semibold underline" onClick={() => { setStep("email"); setOtpVal(""); }}>
+              <div className="rounded-xl bg-red-950/40 border border-red-800/50 px-3.5 py-2.5 text-xs text-red-300">
+                Verification code expired. Please{" "}
+                <button type="button" className="font-bold underline text-red-200" onClick={() => { setStep("email"); setOtpVal(""); }}>
                   go back
                 </button>{" "}
-                and request a new one.
+                and request a new code.
               </div>
             )}
-            <div className="space-y-1.5">
-              <label htmlFor="otp" className="block text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-                Verification Code
+
+            <div className="space-y-2">
+              <label htmlFor="otp" className="block text-[11px] font-bold tracking-widest text-[#c5a059] uppercase">
+                VERIFICATION CODE
               </label>
-              <input
-                id="otp"
-                type="text"
-                inputMode="numeric"
-                placeholder="Enter 6-digit OTP"
-                maxLength={6}
-                value={otpVal}
-                onChange={(e) => setOtpVal(e.target.value.replace(/[^0-9]/g, ""))}
-                className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3.5 text-sm text-slate-800 placeholder:text-slate-400 tracking-[0.2em] font-semibold text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-[#3b82f6] transition-all"
-                required
-                disabled={loading || otpExpired}
-                autoComplete="one-time-code"
-              />
-              <p className="text-[11px] text-slate-400">Code expires in 5 minutes</p>
+              <div className="flex items-center gap-2.5">
+                <div className="size-10 rounded-full bg-[#181510] border border-[#2d2518] flex items-center justify-center text-[#d4af37] shrink-0">
+                  <KeyRound className="size-4" />
+                </div>
+                <input
+                  id="otp"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Enter 6-digit OTP"
+                  maxLength={6}
+                  value={otpVal}
+                  onChange={(e) => setOtpVal(e.target.value.replace(/[^0-9]/g, ""))}
+                  className="h-11 flex-1 rounded-xl border border-[#262016] bg-[#08080c] px-3.5 text-sm text-white placeholder:text-[#4a4a58] tracking-[0.25em] font-bold text-center focus:outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]/30 transition-all"
+                  required
+                  disabled={loading || otpExpired}
+                  autoComplete="one-time-code"
+                />
+              </div>
+              <p className="text-[11px] text-[#71717a] text-right">Code expires in 5 minutes</p>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-slate-400">
+            <div className="flex items-center justify-between text-xs text-[#a1a1aa] pt-1">
               <button
                 type="button"
                 onClick={() => {
@@ -450,17 +570,17 @@ export function LoginPage() {
                   setOtpVal("");
                   sentOtpRef.current = "";
                 }}
-                className="inline-flex items-center gap-1 hover:text-slate-600 transition-colors"
+                className="inline-flex items-center gap-1 hover:text-[#d4af37] transition-colors"
               >
                 <ArrowLeft className="size-3" /> Change Email
               </button>
               {timer > 0 ? (
-                <span>Resend in {timer}s</span>
+                <span className="text-[#71717a]">Resend in {timer}s</span>
               ) : (
                 <button
                   type="button"
                   onClick={handleResend}
-                  className="text-blue-600 font-semibold hover:underline"
+                  className="text-[#c5a059] font-bold hover:underline"
                 >
                   Resend Code
                 </button>
@@ -470,18 +590,41 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading || otpExpired}
-              className="w-full h-11 bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2 active:scale-[0.99] transition-all cursor-pointer shadow-sm shadow-blue-500/10 disabled:opacity-50"
+              className="w-full h-12 bg-gradient-to-r from-[#b8860b] via-[#d4af37] to-[#e5c158] hover:from-[#c59114] hover:to-[#f0d068] text-slate-950 font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(212,175,55,0.25)] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
             >
               {loading ? (
-                <RefreshCw className="size-4 animate-spin" />
+                <RefreshCw className="size-4 animate-spin text-slate-950" />
               ) : (
-                "Sign in"
+                "Sign In"
               )}
             </button>
           </form>
         )}
 
+        {/* Feature Badges Footer inside Card */}
+        <div className="grid grid-cols-3 gap-1 pt-5 mt-6 border-t border-[#1e1b15]">
+          <div className="flex flex-col items-center gap-1 border-r border-[#1e1b15] px-1">
+            <ShieldCheck className="size-4 text-[#d4af37]" />
+            <span className="text-[10px] font-medium text-[#9a9aa0]">Secure &amp; Safe</span>
+          </div>
+          <div className="flex flex-col items-center gap-1 border-r border-[#1e1b15] px-1">
+            <Clock className="size-4 text-[#d4af37]" />
+            <span className="text-[10px] font-medium text-[#9a9aa0]">Quick Access</span>
+          </div>
+          <div className="flex flex-col items-center gap-1 px-1">
+            <Headphones className="size-4 text-[#d4af37]" />
+            <span className="text-[10px] font-medium text-[#9a9aa0]">24/7 Support</span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Copyright Footer */}
+      <div className="py-4 text-center text-xs text-[#71717a] relative z-10 space-y-0.5">
+        <div>© 2026 Jain Mobile &amp; Finance.</div>
+        <div>All rights reserved.</div>
       </div>
     </div>
   );
 }
+
