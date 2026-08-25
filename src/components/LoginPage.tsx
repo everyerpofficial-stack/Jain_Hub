@@ -503,27 +503,6 @@ export function LoginPage() {
                 )}
               </button>
             </div>
-
-            {/* Divider OR */}
-            <div className="flex items-center gap-4 my-5">
-              <div className="flex-1 h-px bg-[#242018]" />
-              <span className="text-[11px] font-bold tracking-widest text-[#71717a] uppercase">OR</span>
-              <div className="flex-1 h-px bg-[#242018]" />
-            </div>
-
-            {/* Secondary Action Button */}
-            <button
-              type="button"
-              onClick={() => {
-                toast.info("Mobile Login Mode", {
-                  description: "Enter your registered email above to receive an instant verification code on your device.",
-                });
-              }}
-              className="w-full h-11 rounded-xl border border-[#3d3322] hover:border-[#c5a059] bg-[#12100c]/60 hover:bg-[#1a1712] text-[#d4af37] font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              <Phone className="size-4 text-[#d4af37]" />
-              Login with Mobile Number
-            </button>
           </form>
         ) : (
           <form onSubmit={handleVerifyOtp} className="text-left space-y-5" autoComplete="off">
