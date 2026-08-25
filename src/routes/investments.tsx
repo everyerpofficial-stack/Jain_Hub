@@ -144,13 +144,13 @@ function InvestmentsPage() {
             onClick={() => openDialog("withdrawProfit")}
             className="h-9 px-3.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow transition-colors cursor-pointer"
           >
-            <ArrowUpRight className="size-4" /> Withdraw Profit
+            <ArrowUpRight className="size-4" /> Withdraw
           </button>
           <button
             onClick={() => openDialog("depositProfit")}
             className="h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow transition-colors cursor-pointer"
           >
-            <ArrowDownRight className="size-4" /> Deposit Taken Money
+            <ArrowDownRight className="size-4" /> Deposit
           </button>
           <button
             onClick={() => {

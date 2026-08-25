@@ -50,11 +50,9 @@ function ReportsPage() {
     return isDateInRange(cDate, startDate, endDate);
   });
 
-  const custMap = new Map(customers.map((c) => [c.name, c.billDate]));
   const filteredLoans = loans.filter((l) => {
-    const bDateStr = custMap.get(l.customer);
-    if (!bDateStr) return true;
-    const pDate = parseAppDate(bDateStr);
+    if (!l.date) return true;
+    const pDate = parseAppDate(l.date);
     return isDateInRange(pDate, startDate, endDate);
   });
 
@@ -110,12 +108,12 @@ function ReportsPage() {
   const formattedLoans = filteredLoans.map((l) => ({
     "Loan Reference": l.id || "—",
     "Customer Name": l.customer || "—",
-    "Mobile Device": l.product || "—",
     "EMI Amount": l.emi || "—",
     "Deposit / Down Payment": l.deposit || "—",
     "Principal Financed": l.amount || "—",
     "Duration": l.duration || "—",
     "Monthly Interest": l.interest || "—",
+    "Collected Amount": safeFormatInr(l.collectedAmount || 0),
     "Status": l.status || "—",
   }));
 

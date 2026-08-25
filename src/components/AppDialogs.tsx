@@ -749,10 +749,8 @@ function InvestmentDialog() {
 function LoanDialog() {
   const { open, close } = useUi();
   const addLoan = useStore((s) => s.addLoan);
-  const customers = useStore((s) => s.customers);
 
   const [customer, setCustomer] = useState("");
-  const [product, setProduct] = useState("");
   const [amount, setAmount] = useState("");
   const [deposit, setDeposit] = useState("");
   const [interest, setInterest] = useState(INTEREST_OPTIONS[1] ?? "2");
@@ -761,7 +759,6 @@ function LoanDialog() {
   useEffect(() => {
     if (open !== "loan") {
       setCustomer("");
-      setProduct("");
       setAmount("");
       setDeposit("");
       setInterest(INTEREST_OPTIONS[1] ?? "2");
@@ -776,32 +773,18 @@ function LoanDialog() {
 
   const depositExceedsAmount = depositNum > amountNum && amountNum > 0;
   const canSubmit =
-    !!customer.trim() && !!product.trim() && amountNum > 0 && depositNum >= 0 && !depositExceedsAmount;
-
-  const customerNames = customers.map((c) => c.name).filter(Boolean);
+    !!customer.trim() && amountNum > 0 && depositNum >= 0 && !depositExceedsAmount;
 
   return (
     <Dialog open={open === "loan"} onOpenChange={(o) => !o && close()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New loan</DialogTitle>
-          <DialogDescription>Register a financed handset against a customer.</DialogDescription>
+          <DialogDescription>Register a loan for a customer.</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3 py-2">
           <div className="col-span-2">
-            {customerNames.length > 0 ? (
-              <Select
-                label="Customer"
-                value={customer}
-                onChange={setCustomer}
-                options={["", ...customerNames]}
-              />
-            ) : (
-              <Field label="Customer" value={customer} onChange={setCustomer} placeholder="Customer name" />
-            )}
-          </div>
-          <div className="col-span-2">
-            <Field label="Product" value={product} onChange={setProduct} placeholder="e.g. Redmi Note 13 5G" />
+            <Field label="Customer / Borrower Name" value={customer} onChange={setCustomer} placeholder="e.g. Ramesh Kumar" />
           </div>
           <Field label="Loan amount (₹)" value={amount} onChange={setAmount} type="number" inputMode="numeric" placeholder="15000" highlight />
           <Field label="Deposit (₹)" value={deposit} onChange={setDeposit} type="number" inputMode="numeric" placeholder="3000" />
@@ -830,7 +813,6 @@ function LoanDialog() {
               try {
                 const l = addLoan({
                   customer: customer.trim(),
-                  product: product.trim(),
                   amount: amountNum,
                   deposit: depositNum,
                   interest: Number(interest) || 0,
@@ -865,15 +847,19 @@ function WithdrawProfitDialog() {
 
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(getTodayYmd());
-  const [method, setMethod] = useState<"Cash" | "UPI" | "Bank" | "Cash & Bank">("Cash");
-  const [notes, setNotes] = useState("Owner Profit Withdrawal");
+  const [method, setMethod] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
+  const [cashAmount, setCashAmount] = useState("");
+  const [upiAmount, setUpiAmount] = useState("");
+  const [notes, setNotes] = useState("Withdrawal");
 
   useEffect(() => {
     if (isOpen) {
       setAmount("");
       setDate(getTodayYmd());
       setMethod("Cash");
-      setNotes("Owner Profit Withdrawal");
+      setCashAmount("");
+      setUpiAmount("");
+      setNotes("Withdrawal");
     }
   }, [isOpen]);
 
@@ -890,13 +876,23 @@ function WithdrawProfitDialog() {
   const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
 
   const amountNum = Number(amount) || 0;
-  const canSubmit = amountNum > 0;
+  const cashNum = Number(cashAmount) || 0;
+  const upiNum = Number(upiAmount) || 0;
+  const isSplitValid = method !== "Cash & UPI" || (cashNum + upiNum === amountNum && amountNum > 0);
+  const canSubmit = amountNum > 0 && isSplitValid;
+
+  const handleAmountChange = (val: string) => {
+    setAmount(val);
+    const num = Number(val) || 0;
+    setCashAmount(String(num));
+    setUpiAmount("0");
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && close()}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Withdraw Profit from Business</DialogTitle>
+          <DialogTitle>Withdraw</DialogTitle>
           <DialogDescription>
             Withdraw available net profit or capital distribution from the business fund.
           </DialogDescription>
@@ -919,26 +915,65 @@ function WithdrawProfitDialog() {
           </div>
 
           <Field
-            label="Withdrawal Amount (₹)"
-            value={amount}
-            onChange={setAmount}
-            type="number"
-            inputMode="numeric"
-            placeholder="e.g. 25000"
-            highlight
-          />
-          <Field
             label="Date"
             value={date}
             onChange={setDate}
             type="date"
           />
+
+          <Field
+            label="Withdrawal Amount (₹)"
+            value={amount}
+            onChange={handleAmountChange}
+            type="number"
+            inputMode="numeric"
+            placeholder="e.g. 25000"
+            highlight
+          />
+
           <Select
             label="Payment Mode"
             value={method}
-            onChange={(v) => setMethod(v as any)}
-            options={["Cash", "UPI", "Bank", "Cash & Bank"]}
+            onChange={(v) => {
+              const m = v as "Cash" | "UPI" | "Cash & UPI";
+              setMethod(m);
+              if (m === "Cash & UPI") {
+                setCashAmount(String(amountNum));
+                setUpiAmount("0");
+              }
+            }}
+            options={["Cash", "UPI", "Cash & UPI"]}
           />
+
+          {method === "Cash & UPI" && (
+            <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-border bg-muted/20">
+              <Field
+                label="Cash Amount (₹)"
+                value={cashAmount}
+                onChange={(v) => {
+                  setCashAmount(v);
+                  const c = Number(v) || 0;
+                  setUpiAmount(String(Math.max(0, amountNum - c)));
+                }}
+                type="number"
+                inputMode="numeric"
+                placeholder="0"
+              />
+              <Field
+                label="UPI Amount (₹)"
+                value={upiAmount}
+                onChange={(v) => {
+                  setUpiAmount(v);
+                  const u = Number(v) || 0;
+                  setCashAmount(String(Math.max(0, amountNum - u)));
+                }}
+                type="number"
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </div>
+          )}
+
           <Field
             label="Reason / Notes"
             value={notes}
@@ -963,9 +998,11 @@ function WithdrawProfitDialog() {
                   amount: amountNum,
                   date,
                   method,
+                  cashAmount: method === "Cash & UPI" ? cashNum : undefined,
+                  bankAmount: method === "Cash & UPI" ? upiNum : undefined,
                   notes: notes.trim(),
                 });
-                toast.success(`Withdrew ₹${txn.amount.toLocaleString("en-IN")} from profit`);
+                toast.success(`Withdrew ₹${txn.amount.toLocaleString("en-IN")}`);
                 close();
               } catch (err) {
                 toast.error("Withdrawal failed", {
@@ -974,7 +1011,7 @@ function WithdrawProfitDialog() {
               }
             }}
           >
-            Withdraw Profit
+            Withdraw
           </PrimaryBtn>
         </DialogFooter>
       </DialogContent>
@@ -991,15 +1028,19 @@ function DepositProfitDialog() {
 
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(getTodayYmd());
-  const [method, setMethod] = useState<"Cash" | "UPI" | "Bank" | "Cash & Bank">("Cash");
-  const [notes, setNotes] = useState("Redeposit Taken Profit");
+  const [method, setMethod] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
+  const [cashAmount, setCashAmount] = useState("");
+  const [upiAmount, setUpiAmount] = useState("");
+  const [notes, setNotes] = useState("Deposit");
 
   useEffect(() => {
     if (isOpen) {
       setAmount("");
       setDate(getTodayYmd());
       setMethod("Cash");
-      setNotes("Redeposit Taken Profit");
+      setCashAmount("");
+      setUpiAmount("");
+      setNotes("Deposit");
     }
   }, [isOpen]);
 
@@ -1008,16 +1049,26 @@ function DepositProfitDialog() {
   const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
 
   const amountNum = Number(amount) || 0;
+  const cashNum = Number(cashAmount) || 0;
+  const upiNum = Number(upiAmount) || 0;
   const isExceedingTaken = amountNum > currentTakenBalance;
-  const canSubmit = amountNum > 0 && !isExceedingTaken;
+  const isSplitValid = method !== "Cash & UPI" || (cashNum + upiNum === amountNum && amountNum > 0);
+  const canSubmit = amountNum > 0 && !isExceedingTaken && isSplitValid;
+
+  const handleAmountChange = (val: string) => {
+    setAmount(val);
+    const num = Number(val) || 0;
+    setCashAmount(String(num));
+    setUpiAmount("0");
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && close()}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Deposit Taken Profit Back</DialogTitle>
+          <DialogTitle>Deposit</DialogTitle>
           <DialogDescription>
-            Deposit back previously taken profit money into the business fund.
+            Deposit back previously taken money into the business fund.
           </DialogDescription>
         </DialogHeader>
 
@@ -1030,26 +1081,65 @@ function DepositProfitDialog() {
           </div>
 
           <Field
-            label="Deposit Amount (₹)"
-            value={amount}
-            onChange={setAmount}
-            type="number"
-            inputMode="numeric"
-            placeholder="e.g. 10000"
-            highlight
-          />
-          <Field
             label="Date"
             value={date}
             onChange={setDate}
             type="date"
           />
+
+          <Field
+            label="Deposit Amount (₹)"
+            value={amount}
+            onChange={handleAmountChange}
+            type="number"
+            inputMode="numeric"
+            placeholder="e.g. 10000"
+            highlight
+          />
+
           <Select
             label="Payment Mode"
             value={method}
-            onChange={(v) => setMethod(v as any)}
-            options={["Cash", "UPI", "Bank", "Cash & Bank"]}
+            onChange={(v) => {
+              const m = v as "Cash" | "UPI" | "Cash & UPI";
+              setMethod(m);
+              if (m === "Cash & UPI") {
+                setCashAmount(String(amountNum));
+                setUpiAmount("0");
+              }
+            }}
+            options={["Cash", "UPI", "Cash & UPI"]}
           />
+
+          {method === "Cash & UPI" && (
+            <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-border bg-muted/20">
+              <Field
+                label="Cash Amount (₹)"
+                value={cashAmount}
+                onChange={(v) => {
+                  setCashAmount(v);
+                  const c = Number(v) || 0;
+                  setUpiAmount(String(Math.max(0, amountNum - c)));
+                }}
+                type="number"
+                inputMode="numeric"
+                placeholder="0"
+              />
+              <Field
+                label="UPI Amount (₹)"
+                value={upiAmount}
+                onChange={(v) => {
+                  setUpiAmount(v);
+                  const u = Number(v) || 0;
+                  setCashAmount(String(Math.max(0, amountNum - u)));
+                }}
+                type="number"
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </div>
+          )}
+
           <Field
             label="Reason / Remarks"
             value={notes}
@@ -1074,6 +1164,8 @@ function DepositProfitDialog() {
                   amount: amountNum,
                   date,
                   method,
+                  cashAmount: method === "Cash & UPI" ? cashNum : undefined,
+                  bankAmount: method === "Cash & UPI" ? upiNum : undefined,
                   notes: notes.trim(),
                 });
                 toast.success(`Deposited ₹${txn.amount.toLocaleString("en-IN")} back into business fund`);
@@ -1085,7 +1177,7 @@ function DepositProfitDialog() {
               }
             }}
           >
-            Deposit Taken Money
+            Deposit
           </PrimaryBtn>
         </DialogFooter>
       </DialogContent>

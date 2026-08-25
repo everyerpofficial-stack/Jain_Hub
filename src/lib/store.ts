@@ -217,7 +217,9 @@ export type ProfitTransaction = {
   amount: number;
   formattedAmount: string;
   date: string;
-  method: "Cash" | "UPI" | "Bank" | "Cash & Bank";
+  method: "Cash" | "UPI" | "Bank" | "Cash & Bank" | "Cash & UPI";
+  cashAmount?: number;
+  bankAmount?: number;
   notes?: string;
   withdrawnBy?: string;
   takenBalanceAfter: number;
@@ -292,13 +294,16 @@ async function hashPassword(password: string, salt: string): Promise<string> {
 export type Loan = {
   id: string;
   customer: string;
-  product: string;
+  product?: string;
   amount: string;
   deposit: string;
   emi: string;
   duration: string;
   interest: string;
   status: "Active" | "Overdue" | "Completed" | "Defaulted";
+  date?: string;
+  collectedAmount?: number;
+  paidEmis?: number;
 };
 
 export type Collection = {
@@ -534,8 +539,8 @@ type State = {
   deleteInvestment: (id: string) => void;
   deleteProfitTransaction: (id: string) => void;
   deleteDocument: (id: string) => void;
-  withdrawProfit: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank"; notes?: string }) => ProfitTransaction;
-  depositTakenMoney: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank"; notes?: string }) => ProfitTransaction;
+  withdrawProfit: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank" | "Cash & UPI"; notes?: string; cashAmount?: number; bankAmount?: number }) => ProfitTransaction;
+  depositTakenMoney: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank" | "Cash & UPI"; notes?: string; cashAmount?: number; bankAmount?: number }) => ProfitTransaction;
   addCustomer: (input: {
     firstName: string; fatherName: string; surname: string;
     mobile: string; aadhaar: string;
@@ -562,7 +567,8 @@ type State = {
     status: Customer["status"];
     fileCharge?: number;
   }) => Customer | undefined;
-  addLoan: (input: { customer: string; product: string; amount: number; deposit: number; interest: number; months: number }) => Loan;
+  addLoan: (input: { customer: string; amount: number; deposit: number; interest: number; months: number; date?: string; product?: string }) => Loan;
+  collectLoanPayment: (input: { loanId: string; amount: number; method: Payment["method"]; collector?: string; remarks?: string; date?: string }) => void;
   recordPayment: (input: { customerId: string; amount: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => void;
   collectEmi: (input: { collectionId: string; method: Collection["method"] }) => void;
   receiveCustomPayment: (input: { customer: string; amount: number; method: Payment["method"]; collector: string }) => void;
@@ -1422,12 +1428,68 @@ export const useStore = create<State>()(
         }, 0);
         const id = "LN-" + (maxLoanId + 1).toString().padStart(3, "0");
         const loan: Loan = {
-          id, customer: input.customer, product: input.product,
-          amount: fmtInr(input.amount), deposit: fmtInr(input.deposit),
-          emi: fmtInr(emi), duration: `${months} mo`, interest: `${input.interest}%`, status: "Active",
+          id,
+          customer: input.customer,
+          product: input.product || undefined,
+          amount: fmtInr(input.amount),
+          deposit: fmtInr(input.deposit),
+          emi: fmtInr(emi),
+          duration: `${months} mo`,
+          interest: `${input.interest}%`,
+          status: "Active",
+          date: input.date || today(),
+          collectedAmount: 0,
+          paidEmis: 0,
         };
         set((s) => ({ loans: [loan, ...s.loans] }));
         return loan;
+      },
+
+      collectLoanPayment: ({ loanId, amount, method, collector, remarks, date }) => {
+        const loan = get().loans.find((l) => l.id === loanId);
+        if (!loan) return;
+
+        const curCollected = loan.collectedAmount || 0;
+        const newCollected = curCollected + amount;
+        const totalAmountNum = parseAmount(loan.amount);
+        const depositNum = parseAmount(loan.deposit);
+        const netLoanPrincipal = Math.max(0, totalAmountNum - depositNum);
+
+        const newPaidEmis = (loan.paidEmis || 0) + 1;
+        const isFullyPaid = netLoanPrincipal > 0 && newCollected >= netLoanPrincipal;
+
+        set((s) => ({
+          loans: s.loans.map((l) => {
+            if (l.id !== loanId) return l;
+            return {
+              ...l,
+              collectedAmount: newCollected,
+              paidEmis: newPaidEmis,
+              status: isFullyPaid ? "Completed" : l.status,
+            };
+          }),
+        }));
+
+        const txnId = nextSeqId("TXN-", get().payments.map((x) => x.id));
+        const paymentDate = date || today();
+        const newPayment: Payment = {
+          id: txnId,
+          customer: loan.customer,
+          customerId: "",
+          date: paymentDate,
+          amount: fmtInr(amount),
+          pending: isFullyPaid ? "0" : "—",
+          collector: collector || get().currentUser?.name || "System",
+          method,
+          status: "Success",
+          remarks: remarks || `Loan Collection for ${loan.id}`,
+        };
+
+        set((s) => ({
+          payments: [newPayment, ...s.payments],
+        }));
+
+        syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "loan collection payment");
       },
 
       collectEmi: ({ collectionId, method }) => {
@@ -1520,6 +1582,8 @@ export const useStore = create<State>()(
           formattedAmount: fmtInr(input.amount),
           date: input.date ? formatDateToInr(input.date) : today(),
           method: input.method ?? "Cash",
+          cashAmount: input.cashAmount,
+          bankAmount: input.bankAmount,
           notes: input.notes || "Profit Withdrawal",
           withdrawnBy: get().currentUser?.name || "Admin",
           takenBalanceAfter: newTakenBalance,
@@ -1567,6 +1631,8 @@ export const useStore = create<State>()(
           formattedAmount: fmtInr(input.amount),
           date: input.date ? formatDateToInr(input.date) : today(),
           method: input.method ?? "Cash",
+          cashAmount: input.cashAmount,
+          bankAmount: input.bankAmount,
           notes: input.notes || "Redeposit Taken Profit",
           withdrawnBy: get().currentUser?.name || "Admin",
           takenBalanceAfter: newTakenBalance,
