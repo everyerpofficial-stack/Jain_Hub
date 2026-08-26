@@ -788,7 +788,7 @@ function LoanDialog() {
           </div>
           <Field label="Loan amount (₹)" value={amount} onChange={setAmount} type="number" inputMode="numeric" placeholder="15000" highlight />
           <Field label="Deposit (₹)" value={deposit} onChange={setDeposit} type="number" inputMode="numeric" placeholder="3000" />
-          <Select label="Interest (%)" value={interest} onChange={setInterest} options={INTEREST_OPTIONS} />
+          <Select label="Interest (% / mo)" value={interest} onChange={setInterest} options={INTEREST_OPTIONS} />
           <Select label="Duration (months)" value={months} onChange={setMonths} options={EMI_COUNT_OPTIONS} />
         </div>
 

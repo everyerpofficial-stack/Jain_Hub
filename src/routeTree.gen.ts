@@ -23,6 +23,7 @@ import { Route as ProfitLossRouteImport } from './routes/profit-loss'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RolesRouteImport } from './routes/roles'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as WithdrawDepositRouteImport } from './routes/withdraw-deposit'
 import { Route as MobilesIndexRouteImport } from './routes/mobiles/index'
 import { Route as MobilesAccessoriesRouteImport } from './routes/mobiles/accessories'
 import { Route as MobilesAuditRouteImport } from './routes/mobiles/audit'
@@ -107,6 +108,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WithdrawDepositRoute = WithdrawDepositRouteImport.update({
+  id: '/withdraw-deposit',
+  path: '/withdraw-deposit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MobilesIndexRoute = MobilesIndexRouteImport.update({
   id: '/mobiles/',
   path: '/mobiles/',
@@ -188,6 +194,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
+  '/withdraw-deposit': typeof WithdrawDepositRoute
   '/mobiles/accessories': typeof MobilesAccessoriesRoute
   '/mobiles/audit': typeof MobilesAuditRoute
   '/mobiles/cash-flow': typeof MobilesCashFlowRoute
@@ -217,6 +224,7 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
+  '/withdraw-deposit': typeof WithdrawDepositRoute
   '/mobiles/accessories': typeof MobilesAccessoriesRoute
   '/mobiles/audit': typeof MobilesAuditRoute
   '/mobiles/cash-flow': typeof MobilesCashFlowRoute
@@ -247,6 +255,7 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
+  '/withdraw-deposit': typeof WithdrawDepositRoute
   '/mobiles/accessories': typeof MobilesAccessoriesRoute
   '/mobiles/audit': typeof MobilesAuditRoute
   '/mobiles/cash-flow': typeof MobilesCashFlowRoute
@@ -278,6 +287,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roles'
     | '/settings'
+    | '/withdraw-deposit'
     | '/mobiles/accessories'
     | '/mobiles/audit'
     | '/mobiles/cash-flow'
@@ -307,6 +317,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roles'
     | '/settings'
+    | '/withdraw-deposit'
     | '/mobiles/accessories'
     | '/mobiles/audit'
     | '/mobiles/cash-flow'
@@ -336,6 +347,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roles'
     | '/settings'
+    | '/withdraw-deposit'
     | '/mobiles/accessories'
     | '/mobiles/audit'
     | '/mobiles/cash-flow'
@@ -366,6 +378,7 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   RolesRoute: typeof RolesRoute
   SettingsRoute: typeof SettingsRoute
+  WithdrawDepositRoute: typeof WithdrawDepositRoute
   MobilesAccessoriesRoute: typeof MobilesAccessoriesRoute
   MobilesAuditRoute: typeof MobilesAuditRoute
   MobilesCashFlowRoute: typeof MobilesCashFlowRoute
@@ -481,6 +494,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/withdraw-deposit': {
+      id: '/withdraw-deposit'
+      path: '/withdraw-deposit'
+      fullPath: '/withdraw-deposit'
+      preLoaderRoute: typeof WithdrawDepositRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mobiles/': {
       id: '/mobiles/'
       path: '/mobiles'
@@ -590,6 +610,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   RolesRoute: RolesRoute,
   SettingsRoute: SettingsRoute,
+  WithdrawDepositRoute: WithdrawDepositRoute,
   MobilesAccessoriesRoute: MobilesAccessoriesRoute,
   MobilesAuditRoute: MobilesAuditRoute,
   MobilesCashFlowRoute: MobilesCashFlowRoute,

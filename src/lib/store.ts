@@ -334,10 +334,10 @@ export function calcEmi(price: number, deposit: number, interestRate: number, no
 }
 
 // Legacy EMI calc
-export function calculateEmi(principal: number, annualRatePct: number, months: number) {
+export function calculateEmi(principal: number, monthlyRatePct: number, months: number) {
   if (!principal || !months) return 0;
-  if (!annualRatePct) return principal / months;
-  const r = annualRatePct / 12 / 100;
+  if (!monthlyRatePct) return principal / months;
+  const r = monthlyRatePct / 100;
   return (principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
 }
 

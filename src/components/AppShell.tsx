@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, HandCoins, Receipt, FileText,
   TrendingUp, PiggyBank, BarChart3, Settings, Shield,
   History, Search, Box, ChevronRight, Plus, Moon, Sun, Menu, X, LogOut,
-  Smartphone, Wallet, RefreshCw
+  Smartphone, Wallet, RefreshCw, ArrowLeftRight
 } from "lucide-react";
 import { toast } from "sonner";
 import { type ReactNode, useState, useEffect, useRef } from "react";
@@ -31,6 +31,7 @@ const financeNav = [
     { to: "/investments", label: "Investments", icon: PiggyBank },
     { to: "/cash-flow", label: "Cash & UPI Flow", icon: Wallet },
     { to: "/profit-loss", label: "Profit & Loss", icon: BarChart3 },
+    { to: "/withdraw-deposit", label: "Withdraw / Deposit", icon: ArrowLeftRight },
     { to: "/reports", label: "Reports", icon: FileText },
   ]},
   { group: "System", items: [
