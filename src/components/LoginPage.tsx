@@ -498,7 +498,7 @@ export function LoginPage() {
                 ) : (
                   <>
                     <SendHorizontal className="size-4 text-slate-950" />
-                    Send Verification Code
+                    {password.trim() ? "Sign In" : "Send Verification Code"}
                   </>
                 )}
               </button>

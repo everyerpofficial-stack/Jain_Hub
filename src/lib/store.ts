@@ -469,11 +469,9 @@ const FAKE_AUDIT_TS = new Set([
   "25 Jul 2026, 10:00 AM", "24 Jul 2026, 03:45 PM",
 ]);
 
-// No password is baked in here — this account signs in via emailed OTP
-// (Settings > Roles) until an admin sets a password from the Roles page,
-// which is then stored only in the Google Sheet, never in source control.
+// Built-in admin account initialized with default password "515158"
 const seedStaff: Staff[] = [
-  { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both" },
+  { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both", password: "515158" },
 ];
 
 
@@ -785,6 +783,18 @@ export const useStore = create<State>()(
           // directly, then opportunistically migrate it to a salted hash so
           // the plaintext never sits in the sheet/localStorage again.
           if (found.password !== cleanPass) return false;
+          const passwordSalt = generateSalt();
+          const passwordHash = await hashPassword(cleanPass, passwordSalt);
+          const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
+          set((s) => ({
+            staff: s.staff.map((m) => (m.id === found.id ? migrated : m)),
+            currentUser: migrated,
+          }));
+          syncUpsert(get, "Finance_Staff", staffRow(migrated), "staff password migration");
+          clearLoginFailures(cleanEmail);
+          return true;
+        } else if (cleanEmail === "jainmobile7828@gmail.com" && cleanPass === "515158") {
+          // Built-in admin password verification
           const passwordSalt = generateSalt();
           const passwordHash = await hashPassword(cleanPass, passwordSalt);
           const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
