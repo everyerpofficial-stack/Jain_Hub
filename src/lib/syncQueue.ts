@@ -108,3 +108,17 @@ export function enqueueWrite(
     settledAt.set(sheet, Date.now());
   });
 }
+
+/** Registry of IDs explicitly deleted by the user on this device. */
+const deletedIdsRegistry = new Set<string>();
+
+export function markIdDeleted(sheet: string, id: string) {
+  if (sheet && id) {
+    deletedIdsRegistry.add(`${sheet}::${id}`);
+  }
+}
+
+export function isIdDeleted(sheet: string, id: string): boolean {
+  return deletedIdsRegistry.has(`${sheet}::${id}`);
+}
+

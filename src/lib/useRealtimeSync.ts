@@ -13,8 +13,8 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "./store";
 import { useMobileStore } from "./mobileStore";
-import { digestSheets, readSheet } from "./googleSheets";
-import { isSheetBusy } from "./syncQueue";
+import { digestSheets, readSheet, upsertRow, type SheetName } from "./googleSheets";
+import { isSheetBusy, isIdDeleted } from "./syncQueue";
 import { toOptionalNumber } from "./ledger";
 import { toast } from "sonner";
 
@@ -49,6 +49,63 @@ export async function triggerManualSync(forceAll = false): Promise<boolean> {
   } catch (err) {
     console.warn("[RealtimeSync] Manual sync error:", err);
     return false;
+  }
+}
+
+/**
+ * Safe non-destructive reconciliation helper:
+ * Combines Google Sheets rows with un-synced local records.
+ * - Prevents wiping local data if Google Sheets returns 0 rows.
+ * - Preserves local records that have not been explicitly deleted by the user.
+ * - Re-uploads local un-synced records to Google Sheets.
+ */
+function safeReconcile<T extends { id: string }>(
+  url: string,
+  sheet: SheetName,
+  rows: T[],
+  localList: T[],
+  setter: (fn: (s: any) => any) => void,
+  key: string
+) {
+  // 1. If sheet returns 0 rows but local list has data:
+  // DO NOT wipe local list! Preserve local data and upload local items to Google Sheets.
+  if (rows.length === 0 && localList.length > 0) {
+    for (const item of localList) {
+      if (item && item.id && !isIdDeleted(sheet, String(item.id))) {
+        void upsertRow(url, sheet, item as any);
+      }
+    }
+    return;
+  }
+
+  // 2. Map of sheet items by ID
+  const sheetMap = new Map<string, T>(rows.map((r) => [String(r.id), r]));
+
+  // Start with rows from Google Sheets
+  const merged: T[] = [...rows];
+
+  // 3. Preserve local items NOT present on the sheet (unless user explicitly deleted them)
+  for (const loc of localList) {
+    if (!loc || !loc.id) continue;
+    const idStr = String(loc.id);
+    if (!sheetMap.has(idStr)) {
+      if (!isIdDeleted(sheet, idStr)) {
+        merged.push(loc);
+        // Upload un-synced local record to Google Sheets
+        void upsertRow(url, sheet, loc as any);
+      }
+    }
+  }
+
+  const localJSON = JSON.stringify(localList);
+  const mergedJSON = JSON.stringify(merged);
+
+  if (localJSON !== mergedJSON) {
+    setter(() => ({ [key]: merged }));
+    const newFromSheetCount = rows.filter((r) => !localList.some((l) => String(l.id) === String(r.id))).length;
+    if (newFromSheetCount > 0) {
+      toast.info(`↓ ${newFromSheetCount} new records synced from ${sheet}`);
+    }
   }
 }
 
@@ -102,10 +159,6 @@ export function useRealtimeSync() {
           deferred.push(...await reconcileMobiles(activeUrl, changedMobiles));
         }
 
-        // A sheet we skipped (local write still in flight) has NOT been
-        // reconciled, so drop its fingerprint — otherwise it now matches the
-        // recorded digest and would never be seen as "changed" again, leaving
-        // that sheet permanently un-synced for the rest of the session.
         for (const sheet of deferred) delete lastDigestRef.current[sheet];
 
         const reconciledAny =
@@ -149,20 +202,17 @@ export function useRealtimeSync() {
 }
 
 // ── Finance reconciliation ──────────────────────────────────────────────────
-// Full-replace strategy: when digest changes for a sheet, we replace local data
-// with sheet data. This ensures EDITS (not just adds/deletes) propagate.
 async function reconcileFinance(url: string, sheets: string[]): Promise<string[]> {
   const deferred: string[] = [];
+  const finState = useStore.getState();
+  const setFin = (fn: (s: any) => any) => useStore.setState(fn);
+
   for (const sheet of sheets) {
-    // A row we just wrote locally may not be readable back from the sheet
-    // yet. Reconciling now would see it as "missing upstream" and wipe it
-    // from local state. Leave this sheet for the next poll.
     if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
-      const rows = await readSheet(url, sheet as import("./googleSheets").SheetName);
+      const rows = await readSheet(url, sheet as SheetName);
 
       if (sheet === "Finance_Customers") {
-        // Sanitize numeric fields
         const sanitized = rows.map((r: any) => ({
           ...r,
           price: Number(r.price) || 0,
@@ -181,20 +231,7 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
           lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
           missedEmis: Number(r.missedEmis) || 0,
         }));
-        const current = useStore.getState().customers;
-        if (JSON.stringify(current.map(c => c.id).sort()) !== JSON.stringify(sanitized.map((r: any) => String(r.id)).sort()) ||
-            sanitized.length !== current.length) {
-          useStore.setState({ customers: sanitized as any[] });
-          toast.info(`↓ Customers synced from Sheets (${sanitized.length} records)`);
-        } else {
-          // Check for field-level changes
-          const currentJSON = JSON.stringify(current);
-          const newJSON = JSON.stringify(sanitized);
-          if (currentJSON !== newJSON) {
-            useStore.setState({ customers: sanitized as any[] });
-            toast.info(`↓ Customer data updated from Sheets`);
-          }
-        }
+        safeReconcile(url, "Finance_Customers", sanitized, finState.customers, setFin, "customers");
       }
 
       if (sheet === "Finance_Payments") {
@@ -205,39 +242,15 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
           cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
           bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
         }));
-        const current = useStore.getState().payments;
-        const currentJSON = JSON.stringify(current);
-        const newJSON = JSON.stringify(sanitized);
-        if (currentJSON !== newJSON) {
-          useStore.setState({ payments: sanitized as any[] });
-          if (sanitized.length !== current.length) {
-            toast.info(`↓ Payments synced from Sheets (${sanitized.length} records)`);
-          }
-        }
+        safeReconcile(url, "Finance_Payments", sanitized, finState.payments, setFin, "payments");
       }
 
       if (sheet === "Finance_Expenses") {
-        const current = useStore.getState().expenses;
-        const currentJSON = JSON.stringify(current);
-        const newJSON = JSON.stringify(rows);
-        if (currentJSON !== newJSON) {
-          useStore.setState({ expenses: rows as any[] });
-          if (rows.length !== current.length) {
-            toast.info(`↓ Expenses synced from Sheets (${rows.length} records)`);
-          }
-        }
+        safeReconcile(url, "Finance_Expenses", rows as any[], finState.expenses, setFin, "expenses");
       }
 
       if (sheet === "Finance_Investments") {
-        const current = useStore.getState().investments;
-        const currentJSON = JSON.stringify(current);
-        const newJSON = JSON.stringify(rows);
-        if (currentJSON !== newJSON) {
-          useStore.setState({ investments: rows as any[] });
-          if (rows.length !== current.length) {
-            toast.info(`↓ Investments synced from Sheets (${rows.length} records)`);
-          }
-        }
+        safeReconcile(url, "Finance_Investments", rows as any[], finState.investments, setFin, "investments");
       }
 
       if (sheet === "Finance_Staff") {
@@ -255,7 +268,7 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
             passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
           }));
 
-          const normalizedCurrent = useStore.getState().staff.map((s) => ({
+          const normalizedCurrent = finState.staff.map((s) => ({
             id: String(s.id || ""),
             name: String(s.name || ""),
             email: String(s.email || ""),
@@ -275,13 +288,10 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
                 : null;
               return { staff: newStaffList, currentUser: updatedUser };
             });
-            toast.info(`↓ Staff directory synced from Sheets`);
           }
         }
       }
     } catch (err) {
-      // A read that failed leaves local state untouched, so treat it like a
-      // deferral: forget the fingerprint and retry on the next poll.
       deferred.push(sheet);
       console.warn(`[RealtimeSync] Failed to reconcile ${sheet}:`, err);
     }
@@ -290,16 +300,13 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
 }
 
 // ── Mobiles reconciliation ──────────────────────────────────────────────────
-// Full-replace strategy: replace local with sheets data when digest changes.
 async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]> {
   const deferred: string[] = [];
   for (const sheet of sheets) {
-    // See reconcileFinance — don't let a poll overwrite a local record whose
-    // write to the sheet is still in flight.
     if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
-      const rawRows = await readSheet(url, sheet as import("./googleSheets").SheetName);
-      
+      const rawRows = await readSheet(url, sheet as SheetName);
+
       const rows = rawRows.map((r: any) => {
         if (sheet === "Mobiles_Sales") {
           let parsedItems = [];
@@ -315,10 +322,6 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
             totalAmount: Number(r.totalAmount) || 0,
             amountPaid: Number(r.amountPaid) || 0,
             dueAmount: Number(r.dueAmount) || 0,
-            // saleRow() writes these as "" when unset; without normalising,
-            // the blank comes back as a string that passes `!== undefined`
-            // and then fails `> 0`, silently dropping the sale's cash/UPI
-            // inflow from the Cash & UPI Flow ledger.
             cashAmountPaid: toOptionalNumber(r.cashAmountPaid),
             upiAmountPaid: toOptionalNumber(r.upiAmountPaid),
             items: parsedItems,
@@ -341,14 +344,14 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
             items: parsedItems,
           };
         }
-          if (sheet === "Mobiles_Expenses") {
+        if (sheet === "Mobiles_Expenses") {
           return {
             ...r,
             cashAmount: toOptionalNumber(r.cashAmount),
             bankAmount: toOptionalNumber(r.bankAmount),
           };
         }
-      if (sheet === "Mobiles_SupplierPayments") {
+        if (sheet === "Mobiles_SupplierPayments") {
           return {
             ...r,
             amount: Number(r.amount) || 0,
@@ -359,48 +362,18 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
         return r;
       });
 
-      // Full-replace reconciliation: compare and replace if different
-      const fullReplace = (
-        localList: { id: string }[],
-        setter: (fn: (s: any) => any) => void,
-        key: string
-      ) => {
-        const localIds = new Set(localList.map((x) => x.id));
-        const sheetIds = new Set(rows.map((r) => String(r.id)));
-        
-        // Check if there are any differences (adds, deletes, or potential edits)
-        const hasAdds = rows.some((r) => !localIds.has(String(r.id)));
-        const hasDeletes = localList.some((x) => !sheetIds.has(x.id));
-        const sizeChanged = rows.length !== localList.length;
-        
-        if (hasAdds || hasDeletes || sizeChanged) {
-          setter(() => ({ [key]: rows as any[] }));
-          if (hasDeletes) toast.info(`↩ Records removed from ${sheet} (synced)`);
-          if (hasAdds) toast.info(`↓ New records from ${sheet} (synced)`);
-          if (!hasAdds && !hasDeletes && sizeChanged) toast.info(`↓ ${sheet} synced`);
-        } else if (rows.length > 0) {
-          // Same IDs but might have field-level edits — do a lightweight content check
-          const localJSON = JSON.stringify(localList.map(x => x.id).sort());
-          const sheetJSON = JSON.stringify(rows.map((r: any) => String(r.id)).sort());
-          if (localJSON === sheetJSON) {
-            // IDs match, check if content differs
-            setter(() => ({ [key]: rows as any[] }));
-          }
-        }
-      };
+      const mobState = useMobileStore.getState();
+      const setMob = (fn: (s: any) => any) => useMobileStore.setState(fn);
 
-      const store = useMobileStore.getState();
-      const set = (fn: (s: any) => any) => useMobileStore.setState(fn);
-
-      if (sheet === "Mobiles_Sales")            fullReplace(store.sales,            set, "sales");
-      if (sheet === "Mobiles_Purchases")        fullReplace(store.purchases,        set, "purchases");
-      if (sheet === "Mobiles_Products")         fullReplace(store.products,         set, "products");
-      if (sheet === "Mobiles_Suppliers")        fullReplace(store.suppliers,        set, "suppliers");
-      if (sheet === "Mobiles_Customers")        fullReplace(store.customers,        set, "customers");
-      if (sheet === "Mobiles_Expenses")         fullReplace(store.expenses,         set, "expenses");
-      if (sheet === "Mobiles_Accessories")      fullReplace(store.accessories,      set, "accessories");
-      if (sheet === "Mobiles_SupplierPayments") fullReplace(store.supplierPayments || [], set, "supplierPayments");
-      if (sheet === "Mobiles_WarrantyClaims")   fullReplace(store.warranties || [], set, "warranties");
+      if (sheet === "Mobiles_Sales")            safeReconcile(url, "Mobiles_Sales",            rows, mobState.sales,            setMob, "sales");
+      if (sheet === "Mobiles_Purchases")        safeReconcile(url, "Mobiles_Purchases",        rows, mobState.purchases,        setMob, "purchases");
+      if (sheet === "Mobiles_Products")         safeReconcile(url, "Mobiles_Products",         rows, mobState.products,         setMob, "products");
+      if (sheet === "Mobiles_Suppliers")        safeReconcile(url, "Mobiles_Suppliers",        rows, mobState.suppliers,        setMob, "suppliers");
+      if (sheet === "Mobiles_Customers")        safeReconcile(url, "Mobiles_Customers",        rows, mobState.customers,        setMob, "customers");
+      if (sheet === "Mobiles_Expenses")         safeReconcile(url, "Mobiles_Expenses",         rows, mobState.expenses,         setMob, "expenses");
+      if (sheet === "Mobiles_Accessories")      safeReconcile(url, "Mobiles_Accessories",      rows, mobState.accessories,      setMob, "accessories");
+      if (sheet === "Mobiles_SupplierPayments") safeReconcile(url, "Mobiles_SupplierPayments", rows, mobState.supplierPayments || [], setMob, "supplierPayments");
+      if (sheet === "Mobiles_WarrantyClaims")   safeReconcile(url, "Mobiles_WarrantyClaims",   rows, mobState.warranties || [], setMob, "warranties");
 
     } catch (err) {
       deferred.push(sheet);
@@ -409,4 +382,5 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
   }
   return deferred;
 }
+
 

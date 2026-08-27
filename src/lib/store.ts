@@ -6,7 +6,7 @@ import { persist } from "zustand/middleware";
 import XLSX from "xlsx-js-style";
 import { toast } from "sonner";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
-import { enqueueWrite } from "./syncQueue";
+import { enqueueWrite, markIdDeleted } from "./syncQueue";
 import { nextSeqId } from "./utils";
 
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";
@@ -663,6 +663,7 @@ function syncUpsert(get: () => State, sheet: SheetName, row: SheetRow, label: st
   }
 }
 function syncDelete(get: () => State, sheet: SheetName, id: string, label: string) {
+  markIdDeleted(sheet, id);
   const { sheetsConfig } = get();
   if (sheetsConfig.enabled && sheetsConfig.url) {
     const url = sheetsConfig.url;

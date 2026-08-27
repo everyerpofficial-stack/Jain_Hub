@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import { formatDateToInr } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
-import { enqueueWrite } from "./syncQueue";
+import { enqueueWrite, markIdDeleted } from "./syncQueue";
 import { toOptionalNumber } from "./ledger";
 
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
@@ -484,6 +484,7 @@ function syncUpsert(get: () => MobilesState, sheet: SheetName, row: SheetRow, la
   }
 }
 function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label: string) {
+  markIdDeleted(sheet, id);
   const { sheetsConfig } = get();
   if (sheetsConfig.enabled && sheetsConfig.url) {
     const url = sheetsConfig.url;
@@ -1178,8 +1179,8 @@ export const useMobileStore = create<MobilesState>()(
           });
           set({ sales: sanitizedSales as unknown as MobileSale[] });
 
-          set({ expenses: expRows as unknown as MobileExpense[] });
-          set({ suppliers: supRows as unknown as MobileSupplier[] });
+          if (expRows.length > 0 || get().expenses.length === 0) set({ expenses: expRows as unknown as MobileExpense[] });
+          if (supRows.length > 0 || get().suppliers.length === 0) set({ suppliers: supRows as unknown as MobileSupplier[] });
 
           // Sanitise supplier payments — paymentMode must survive the Sheets
           // round-trip or splitByMethod defaults every payment to bank/UPI.
@@ -1198,7 +1199,9 @@ export const useMobileStore = create<MobilesState>()(
               bankAmount: toOptionalNumber(r.bankAmount),
             };
           });
-          set({ supplierPayments: sanitizedSupPayments as unknown as SupplierPayment[] });
+          if (supPayRows.length > 0 || (get().supplierPayments || []).length === 0) {
+            set({ supplierPayments: sanitizedSupPayments as unknown as SupplierPayment[] });
+          }
 
           const sanitizedCustomers = custRows.map((r: any) => ({
             ...r,
@@ -1206,9 +1209,9 @@ export const useMobileStore = create<MobilesState>()(
             outstanding: Number(r.outstanding) || 0,
             isBlacklisted: r.isBlacklisted === true || r.isBlacklisted === "true",
           }));
-          set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
+          if (custRows.length > 0 || get().customers.length === 0) set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
 
-          set({ products: prodRows as unknown as MobileProduct[] });
+          if (prodRows.length > 0 || get().products.length === 0) set({ products: prodRows as unknown as MobileProduct[] });
 
           // Sanitise purchases — amount/quantity must be numbers for
           // settleSupplier arithmetic, and paymentMode must be normalised
