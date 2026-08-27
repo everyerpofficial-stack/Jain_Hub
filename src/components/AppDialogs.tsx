@@ -376,7 +376,7 @@ function CustomerDialog() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Select label="Interest (% / mo)" value={interestRate} onChange={setInterestRate} options={INTEREST_OPTIONS} />
+                <Field label="Interest (% / mo)" value={interestRate} onChange={setInterestRate} type="number" inputMode="decimal" placeholder="e.g. 2" />
               </div>
               <div className="flex items-center justify-between h-9 mt-[22px] px-3 rounded-md border border-border bg-surface text-sm">
                 <span className="text-muted-foreground text-xs font-medium">Interest/mo</span>
@@ -384,7 +384,7 @@ function CustomerDialog() {
               </div>
             </div>
 
-            <Select label="No of EMI" value={noOfEmi} onChange={setNoOfEmi} options={EMI_COUNT_OPTIONS} />
+            <Field label="No of EMI (months)" value={noOfEmi} onChange={setNoOfEmi} type="number" inputMode="numeric" placeholder="e.g. 6" />
 
             {/* Summary calculation box */}
             <div className="rounded-lg border border-border bg-surface px-4 py-3 space-y-1 mt-1">
@@ -788,8 +788,8 @@ function LoanDialog() {
           </div>
           <Field label="Loan amount (₹)" value={amount} onChange={setAmount} type="number" inputMode="numeric" placeholder="15000" highlight />
           <Field label="Deposit (₹)" value={deposit} onChange={setDeposit} type="number" inputMode="numeric" placeholder="3000" />
-          <Select label="Interest (% / mo)" value={interest} onChange={setInterest} options={INTEREST_OPTIONS} />
-          <Select label="Duration (months)" value={months} onChange={setMonths} options={EMI_COUNT_OPTIONS} />
+          <Field label="Interest (% / mo)" value={interest} onChange={setInterest} type="number" inputMode="decimal" placeholder="e.g. 2" />
+          <Field label="Duration (months)" value={months} onChange={setMonths} type="number" inputMode="numeric" placeholder="e.g. 12" />
         </div>
 
         {depositExceedsAmount && (

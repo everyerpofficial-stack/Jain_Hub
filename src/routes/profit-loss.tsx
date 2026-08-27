@@ -183,18 +183,6 @@ function ProfitLossPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => openDialog("withdrawProfit")}
-            className="h-9 px-3.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow transition-colors cursor-pointer"
-          >
-            <ArrowUpRight className="size-4" /> Withdraw
-          </button>
-          <button
-            onClick={() => openDialog("depositProfit")}
-            className="h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow transition-colors cursor-pointer"
-          >
-            <ArrowDownRight className="size-4" /> Deposit
-          </button>
-          <button
             onClick={() => {
               downloadExcel("profit-loss.xlsx", "Profit & Loss", [
                 { Item: "File Charge Income", Amount: fmt(totalFileCharge) },
@@ -279,123 +267,7 @@ function ProfitLossPage() {
         </Card>
       </div>
 
-      {/* Profit Withdrawal & Redeposit Management Card */}
-      <Card className="mt-6">
-        <SectionHeader
-          title="Profit Withdrawal & Deposit Tracker"
-          action={
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => openDialog("withdrawProfit")}
-                className="h-8 px-3 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <ArrowUpRight className="size-3.5" /> Withdraw
-              </button>
-              <button
-                onClick={() => openDialog("depositProfit")}
-                className="h-8 px-3 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <ArrowDownRight className="size-3.5" /> Deposit
-              </button>
-            </div>
-          }
-        />
 
-        {/* Quick Stat Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 p-4 border-b border-border bg-muted/10">
-          <div className="rounded-lg border border-border bg-surface p-3 text-center">
-            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Net Profit Available</div>
-            <div className={`text-xl font-bold mt-1 ${netProfit >= 0 ? "text-success" : "text-danger"}`}>{fmt(netProfit)}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">Calculated net income</div>
-          </div>
-          <div className="rounded-lg border border-border bg-surface p-3 text-center">
-            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Withdrawn</div>
-            <div className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">{fmt(totalWithdrawn)}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">Cumulative taken money</div>
-          </div>
-          <div className="rounded-lg border border-border bg-surface p-3 text-center">
-            <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Redeposited</div>
-            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{fmt(totalRedeposited)}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">Returned to business fund</div>
-          </div>
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-center">
-            <div className="text-xs text-amber-700 dark:text-amber-300 font-medium uppercase tracking-wider">Outstanding Taken Money</div>
-            <div className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">{fmt(netTakenBalance)}</div>
-            <div className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mt-0.5">Money yet to deposit back</div>
-          </div>
-        </div>
-
-        {/* History Table */}
-        <div className="w-full overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/20">
-                <th className="py-2.5 px-4 font-semibold">Ref ID</th>
-                <th className="py-2.5 px-4 font-semibold">Date</th>
-                <th className="py-2.5 px-4 font-semibold">Type</th>
-                <th className="py-2.5 px-4 font-semibold">Payment Mode</th>
-                <th className="py-2.5 px-4 font-semibold text-right">Amount</th>
-                <th className="py-2.5 px-4 font-semibold text-right">Taken Balance After</th>
-                <th className="py-2.5 px-4 font-semibold">Notes / Reason</th>
-                <th className="py-2.5 px-4 font-semibold">Recorded By</th>
-                {isAdmin && <th className="py-2.5 px-4 text-right font-semibold">Action</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {profitTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-muted-foreground font-semibold">
-                    No profit withdrawals or redeposits recorded yet. Use the buttons above to record a withdrawal or deposit.
-                  </td>
-                </tr>
-              ) : (
-                profitTransactions.map((tx) => (
-                  <tr key={tx.id} className="border-b border-border hover:bg-accent/40 last:border-0">
-                    <td className="py-2.5 px-4 font-mono font-medium text-muted-foreground">{tx.id}</td>
-                    <td className="py-2.5 px-4 text-muted-foreground">{tx.date}</td>
-                    <td className="py-2.5 px-4">
-                      {tx.type === "Withdrawal" ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                          <ArrowUpRight className="size-3" /> Withdrawal
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
-                          <ArrowDownRight className="size-3" /> Redeposit
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-4 font-medium text-foreground">{tx.method}</td>
-                    <td className={`py-2.5 px-4 text-right font-bold ${tx.type === "Withdrawal" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                      {tx.type === "Withdrawal" ? `- ₹${tx.amount.toLocaleString("en-IN")}` : `+ ₹${tx.amount.toLocaleString("en-IN")}`}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-medium text-muted-foreground">
-                      ₹{tx.takenBalanceAfter.toLocaleString("en-IN")}
-                    </td>
-                    <td className="py-2.5 px-4 text-muted-foreground">{tx.notes || "—"}</td>
-                    <td className="py-2.5 px-4 text-muted-foreground">{tx.withdrawnBy || "Admin"}</td>
-                    {isAdmin && (
-                      <td className="py-2.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            if (confirm(`Delete profit transaction ${tx.id} for ₹${tx.amount.toLocaleString("en-IN")}?`)) {
-                              deleteProfitTransaction(tx.id);
-                              toast.success(`Deleted transaction ${tx.id}`);
-                            }
-                          }}
-                          className="size-7 rounded border border-border inline-flex items-center justify-center hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-colors text-muted-foreground cursor-pointer"
-                          title="Delete entry"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
 
       {/* Monthly trend table */}
       <Card className="mt-6">
