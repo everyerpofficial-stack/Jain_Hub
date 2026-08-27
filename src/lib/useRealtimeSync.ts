@@ -12,7 +12,7 @@
 
 import { useEffect, useRef } from "react";
 import {
-  useStore, recalculateLoanStatuses,
+  useStore, recalculateLoanStatuses, seedStaff,
   loanRow, profitTransactionRow, customerRow, paymentRow, documentRow,
 } from "./store";
 import {
@@ -368,6 +368,9 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
             passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
           }));
 
+          const hasDefaultAdmin = newStaffList.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com");
+          const finalStaffList = hasDefaultAdmin ? newStaffList : [seedStaff[0], ...newStaffList];
+
           const normalizedCurrent = finState.staff.map((s) => ({
             id: String(s.id || ""),
             name: String(s.name || ""),
@@ -380,13 +383,13 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
             passwordSalt: s.passwordSalt ? String(s.passwordSalt) : undefined,
           }));
 
-          const isDifferent = JSON.stringify(normalizedCurrent) !== JSON.stringify(newStaffList);
+          const isDifferent = JSON.stringify(normalizedCurrent) !== JSON.stringify(finalStaffList);
           if (isDifferent) {
             useStore.setState((s) => {
               const updatedUser = s.currentUser
-                ? newStaffList.find((m) => m.id === s.currentUser?.id) || s.currentUser
+                ? finalStaffList.find((m) => m.id === s.currentUser?.id) || s.currentUser
                 : null;
-              return { staff: newStaffList, currentUser: updatedUser };
+              return { staff: finalStaffList, currentUser: updatedUser };
             });
           }
         }

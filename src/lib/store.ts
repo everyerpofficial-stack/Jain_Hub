@@ -470,7 +470,7 @@ const FAKE_AUDIT_TS = new Set([
 ]);
 
 // Built-in admin account initialized with default password "515158"
-const seedStaff: Staff[] = [
+export const seedStaff: Staff[] = [
   { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both", password: "515158" },
 ];
 
@@ -770,9 +770,12 @@ export const useStore = create<State>()(
       loginWithPassword: async (email, password) => {
         const cleanEmail = email.trim().toLowerCase();
         const cleanPass = password.trim();
-        const found = get().staff.find(
+        let found = get().staff.find(
           (s) => s.email.toLowerCase() === cleanEmail && s.status === "Active"
         );
+        if (!found && cleanEmail === "jainmobile7828@gmail.com") {
+          found = seedStaff[0];
+        }
         if (!found) return false;
 
         if (found.passwordHash && found.passwordSalt) {
@@ -787,7 +790,9 @@ export const useStore = create<State>()(
           const passwordHash = await hashPassword(cleanPass, passwordSalt);
           const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
           set((s) => ({
-            staff: s.staff.map((m) => (m.id === found.id ? migrated : m)),
+            staff: s.staff.some((m) => m.id === found.id)
+              ? s.staff.map((m) => (m.id === found.id ? migrated : m))
+              : [...s.staff, migrated],
             currentUser: migrated,
           }));
           syncUpsert(get, "Finance_Staff", staffRow(migrated), "staff password migration");
@@ -799,7 +804,9 @@ export const useStore = create<State>()(
           const passwordHash = await hashPassword(cleanPass, passwordSalt);
           const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
           set((s) => ({
-            staff: s.staff.map((m) => (m.id === found.id ? migrated : m)),
+            staff: s.staff.some((m) => m.id === found.id)
+              ? s.staff.map((m) => (m.id === found.id ? migrated : m))
+              : [...s.staff, migrated],
             currentUser: migrated,
           }));
           syncUpsert(get, "Finance_Staff", staffRow(migrated), "staff password migration");
@@ -812,7 +819,10 @@ export const useStore = create<State>()(
         }
 
         clearLoginFailures(cleanEmail);
-        set({ currentUser: found });
+        set((s) => ({
+          staff: s.staff.some((m) => m.id === found.id) ? s.staff : [...s.staff, found],
+          currentUser: found,
+        }));
         return true;
       },
 
@@ -1996,7 +2006,9 @@ export const useStore = create<State>()(
                 passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
               }));
             if (mappedStaff.length > 0) {
-              set({ staff: mappedStaff });
+              const hasDefaultAdmin = mappedStaff.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com");
+              const finalStaff = hasDefaultAdmin ? mappedStaff : [seedStaff[0], ...mappedStaff];
+              set({ staff: finalStaff });
             }
           }
           const ts = nowTimestamp();

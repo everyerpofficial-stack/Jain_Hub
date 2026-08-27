@@ -16,7 +16,7 @@ import {
   Headphones, 
   KeyRound 
 } from "lucide-react";
-import { checkLoginRateLimit, recordLoginFailure, clearLoginFailures } from "@/lib/store";
+import { checkLoginRateLimit, recordLoginFailure, clearLoginFailures, seedStaff } from "@/lib/store";
 import { readSheet } from "@/lib/googleSheets";
 import type { Staff } from "@/lib/store";
 
@@ -47,8 +47,10 @@ async function refreshStaffFromSheets(): Promise<Staff[]> {
           passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
         }));
       if (mappedStaff.length > 0) {
-        useStore.setState({ staff: mappedStaff });
-        return mappedStaff;
+        const hasDefaultAdmin = mappedStaff.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com");
+        const finalStaff = hasDefaultAdmin ? mappedStaff : [seedStaff[0], ...mappedStaff];
+        useStore.setState({ staff: finalStaff });
+        return finalStaff;
       }
     }
   } catch (err) {
@@ -183,6 +185,10 @@ export function LoginPage() {
       } catch (err) {
         console.warn("Failed to refresh staff from sheets on login attempt:", err);
       }
+    }
+
+    if (!exists && cleanEmail === "jainmobile7828@gmail.com") {
+      exists = seedStaff[0];
     }
 
     if (!exists) {
