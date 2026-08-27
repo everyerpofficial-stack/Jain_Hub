@@ -727,7 +727,7 @@ function syncDelete(get: () => State, sheet: SheetName, id: string, label: strin
 // This URL is permanently baked into the app — no manual configuration needed.
 const PERMANENT_SHEETS_URL =
   (import.meta.env.VITE_GOOGLE_SHEETS_URL as string) ||
-  "https://script.google.com/macros/s/AKfycbxgaIiJWfwN9_ssvDfRpWCzbgFwh4aD5OIeibbcaEIP9HxNxWTDyJL5CjFUjduFa1FO7A/exec";
+  "https://script.google.com/macros/s/AKfycbwHwPiu9_3U5D-g819nikVbyMoeJq_myynn75pAufETx4kQdVgfGlTQvlPiRJvLYRGMXQ/exec";
 
 export const useStore = create<State>()(
   persist(
