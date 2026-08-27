@@ -321,7 +321,7 @@ interface MobilesState {
   updateWarrantyStatus: (id: string, status: MobileWarrantyClaim["status"]) => void;
   
   updateSettings: (s: Partial<MobileSettings>) => void;
-  resetAll: () => void;
+  resetAll: () => Promise<void>;
   sheetsConfig: SheetsConfig;
   updateSheetsConfig: (cfg: Partial<SheetsConfig>) => void;
   syncToSheets: () => Promise<{ ok: boolean; error?: string }>;
@@ -816,7 +816,7 @@ export const useMobileStore = create<MobilesState>()(
         }
 
         const cAmt = cashAmount !== undefined ? cashAmount : paymentMode === "Cash" ? payAmt : paymentMode === "Cash & UPI" ? payAmt / 2 : 0;
-        const bAmt = bankAmount !== undefined ? bankAmount : paymentMode === "UPI" || paymentMode === "Bank" ? payAmt : paymentMode === "Cash & UPI" ? payAmt / 2 : 0;
+        const bAmt = bankAmount !== undefined ? bankAmount : paymentMode === "UPI" || (paymentMode as string) === "Bank" ? payAmt : paymentMode === "Cash & UPI" ? payAmt / 2 : 0;
         
         const newPayment: SupplierPayment = {
           id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
@@ -1075,7 +1075,7 @@ export const useMobileStore = create<MobilesState>()(
         syncDelete(get, "Mobiles_Expenses", id, "expense delete");
       },
 
-      resetAll: () => {
+      resetAll: async () => {
         // 1. Clear local state
         set({
           products: [],
@@ -1089,22 +1089,29 @@ export const useMobileStore = create<MobilesState>()(
           warranties: [],
           settings: defaultSettings,
           supplierPayments: [],
-          expenses: []
+          expenses: [],
+          audit: []
         });
         // 2. Also clear Google Sheets — write empty arrays to all Mobiles sheets
         const { sheetsConfig } = get();
         if (sheetsConfig.enabled && sheetsConfig.url) {
-          Promise.all([
-            writeSheet(sheetsConfig.url, "Mobiles_Sales", []),
-            writeSheet(sheetsConfig.url, "Mobiles_Purchases", []),
-            writeSheet(sheetsConfig.url, "Mobiles_Expenses", []),
-            writeSheet(sheetsConfig.url, "Mobiles_Suppliers", []),
-            writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", []),
-            writeSheet(sheetsConfig.url, "Mobiles_Customers", []),
-            writeSheet(sheetsConfig.url, "Mobiles_Products", []),
-            writeSheet(sheetsConfig.url, "Mobiles_Accessories", []),
-            writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", []),
-          ]).catch(() => {/* silent — best effort */});
+          try {
+            await Promise.all([
+              writeSheet(sheetsConfig.url, "Mobiles_Sales", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Purchases", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Expenses", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Suppliers", []),
+              writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Customers", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Products", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Accessories", []),
+              writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", []),
+            ]);
+            const ts = nowTimestamp();
+            set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
+          } catch (err) {
+            console.warn("[mobileStore] Failed to wipe Google Sheets Mobiles data:", err);
+          }
         }
       },
 

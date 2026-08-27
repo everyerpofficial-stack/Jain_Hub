@@ -579,7 +579,7 @@ type State = {
   markNotificationRead: (id: string) => void;
   pushNotification: (n: Omit<Notification, "id" | "time">) => void;
   pushAudit: (e: Omit<AuditEntry, "ts">) => void;
-  resetSeed: () => void;
+  resetSeed: () => Promise<void>;
   recheckStatuses: () => void;
   updateSheetsConfig: (cfg: Partial<SheetsConfig>) => void;
   syncToSheets: () => Promise<{ ok: boolean; error?: string }>;
@@ -1688,26 +1688,31 @@ export const useStore = create<State>()(
       pushNotification: (n) => set((s) => ({ notifications: [{ id: "N" + Date.now(), time: "just now", ...n }, ...s.notifications] })),
       pushAudit: (e) => set((s) => ({ audit: [{ ts: new Date().toLocaleString("en-IN"), ...e }, ...s.audit] })),
 
-      resetSeed: () => {
+      resetSeed: async () => {
         // 1. Reset local state to empty (NOT seed data). The staff directory
-        // is deliberately left untouched — the confirmation dialog for this
-        // action only promises to clear customers/payments/expenses/
-        // investments, and wiping everyone else's login out from under them
-        // (including on the shared sheet) would lock the team out.
+        // is deliberately left untouched so user credentials remain intact.
         set({
           customers: [], loans: [], collections: [],
           payments: [], expenses: [], investments: [],
+          profitTransactions: [],
           notifications: [], audit: [], documents: [],
         });
         // 2. Also clear Google Sheets — write empty arrays to all Finance sheets
         const { sheetsConfig } = get();
         if (sheetsConfig.enabled && sheetsConfig.url) {
-          Promise.all([
-            writeSheet(sheetsConfig.url, "Finance_Customers", []),
-            writeSheet(sheetsConfig.url, "Finance_Payments", []),
-            writeSheet(sheetsConfig.url, "Finance_Expenses", []),
-            writeSheet(sheetsConfig.url, "Finance_Investments", []),
-          ]).catch(() => {/* silent — best effort */});
+          try {
+            await Promise.all([
+              writeSheet(sheetsConfig.url, "Finance_Customers", []),
+              writeSheet(sheetsConfig.url, "Finance_Payments", []),
+              writeSheet(sheetsConfig.url, "Finance_Expenses", []),
+              writeSheet(sheetsConfig.url, "Finance_Investments", []),
+              writeSheet(sheetsConfig.url, "Finance_ProfitTransactions", []),
+            ]);
+            const ts = nowTimestamp();
+            set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
+          } catch (err) {
+            console.warn("[store] Failed to wipe Google Sheets Finance data:", err);
+          }
         }
       },
 

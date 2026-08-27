@@ -99,13 +99,6 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
   const searchRef = useRef<HTMLDivElement>(null);
   const sidebarNavRef = useRef<HTMLElement>(null);
 
-  // Always reset sidebar scroll to top on route change so top section boxes never get hidden
-  useEffect(() => {
-    if (sidebarNavRef.current) {
-      sidebarNavRef.current.scrollTop = 0;
-    }
-  }, [path]);
-
   // Apply dark mode class on mount from persisted state
   useEffect(() => {
     if (darkMode) {
@@ -244,10 +237,7 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
                   <li key={it.to}>
                     <Link
                       to={it.to}
-                      onClick={() => {
-                        setSidebarOpen(false);
-                        if (sidebarNavRef.current) sidebarNavRef.current.scrollTop = 0;
-                      }}
+                      onClick={() => setSidebarOpen(false)}
                       className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm transition-colors ${
                         active
                           ? "bg-foreground text-background font-medium"
@@ -310,7 +300,7 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
       )}
 
       {/* Desktop Sidebar */}
-      <aside className="w-64 shrink-0 border-r border-border bg-surface/60 backdrop-blur sticky top-0 h-screen flex-col hidden lg:flex print:hidden">
+      <aside className="fixed top-0 left-0 bottom-0 h-screen w-64 border-r border-border bg-surface/90 backdrop-blur z-30 flex-col hidden lg:flex print:hidden">
         <SidebarContent />
       </aside>
 
@@ -331,7 +321,7 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
       </aside>
 
       {/* Main */}
-      <main className="flex-1 min-w-0 w-full">
+      <main className="flex-1 min-w-0 w-full lg:pl-64 flex flex-col min-h-screen">
         <div className="border-b border-border bg-surface/60 backdrop-blur sticky top-0 z-10 print:hidden">
           <div className="px-2 sm:px-4 lg:px-8 py-3 sm:py-3.5 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">

@@ -881,6 +881,195 @@ function SupplierPayDialog({
   );
 }
 
+function PayPurchaseBalanceDialog({
+  purchase,
+  onClose
+}: {
+  purchase: MobilePurchase;
+  onClose: () => void;
+}) {
+  const payPurchaseBalance = useMobileStore((s) => s.payPurchaseBalance);
+  const currentPaid = purchase.amountPaid !== undefined ? purchase.amountPaid : (purchase.status === "Paid" ? purchase.amount : 0);
+  const currentDue = purchase.dueAmount !== undefined ? purchase.dueAmount : Math.max(0, purchase.amount - currentPaid);
+
+  const [amount, setAmount] = useState<string>(currentDue > 0 ? String(currentDue) : "");
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
+  const [cashAmount, setCashAmount] = useState<number | "">("");
+  const [bankAmount, setBankAmount] = useState<number | "">("");
+  const [remark, setRemark] = useState("");
+
+  const handleAmountChange = (valStr: string) => {
+    setAmount(valStr);
+    const total = Number(valStr) || 0;
+    if (paymentMode === "Cash & UPI") {
+      const half = Math.floor(total / 2);
+      setCashAmount(half);
+      setBankAmount(total - half);
+    }
+  };
+
+  const handleModeChange = (mode: "Cash" | "UPI" | "Cash & UPI") => {
+    setPaymentMode(mode);
+    const total = Number(amount) || 0;
+    if (mode === "Cash & UPI") {
+      const half = Math.floor(total / 2);
+      setCashAmount(half);
+      setBankAmount(total - half);
+    }
+  };
+
+  const handleSave = () => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) {
+      toast.error("Please enter a valid payment amount");
+      return;
+    }
+    if (amt > currentDue) {
+      toast.error("Cannot pay more than remaining due amount (₹" + currentDue.toLocaleString("en-IN") + ")");
+      return;
+    }
+    if (paymentMode === "Cash & UPI") {
+      const c = Number(cashAmount) || 0;
+      const b = Number(bankAmount) || 0;
+      if (c + b !== amt) {
+        toast.error(`Cash (₹${c}) + UPI (₹${b}) must equal Total Amount (₹${amt})`);
+        return;
+      }
+    }
+
+    const formattedDate = new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    payPurchaseBalance(
+      purchase.id,
+      amt,
+      paymentMode,
+      paymentMode === "Cash & UPI" ? (Number(cashAmount) || 0) : paymentMode === "Cash" ? amt : 0,
+      paymentMode === "Cash & UPI" ? (Number(bankAmount) || 0) : paymentMode === "UPI" ? amt : 0,
+      remark,
+      formattedDate
+    );
+    toast.success(`Payment of ₹${amt.toLocaleString("en-IN")} recorded for Purchase #${purchase.invoiceNo}`);
+    onClose();
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm rounded-xl border border-border shadow-2xl p-6">
+        <DialogHeader className="border-b border-border pb-3">
+          <DialogTitle className="text-base font-bold flex items-center gap-2">
+            <CreditCard className="size-5 text-primary" />
+            <span>Pay Purchase Balance</span>
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Clear balance for Invoice #{purchase.invoiceNo} ({purchase.supplierName})
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="py-4 space-y-3 text-sm">
+          <div className="flex justify-between items-center bg-muted/30 p-2.5 rounded border border-border/60 text-xs">
+            <span className="text-muted-foreground font-medium">Remaining Due:</span>
+            <span className="font-bold text-danger text-sm">₹{currentDue.toLocaleString("en-IN")}</span>
+          </div>
+
+          <label className="block">
+            <span className="text-xs font-semibold text-muted-foreground">Payment Date</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-semibold text-muted-foreground">Amount to Pay (₹)</span>
+            <input
+              type="number"
+              max={currentDue}
+              value={amount}
+              onChange={(e) => handleAmountChange(e.target.value)}
+              placeholder="e.g. 5000"
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none font-semibold"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-semibold text-muted-foreground">Payment Mode</span>
+            <select
+              value={paymentMode}
+              onChange={(e) => handleModeChange(e.target.value as "Cash" | "UPI" | "Cash & UPI")}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none font-semibold"
+            >
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="Cash & UPI">Cash & UPI</option>
+            </select>
+          </label>
+
+          {paymentMode === "Cash & UPI" && (
+            <div className="grid grid-cols-2 gap-3 bg-muted/20 p-3 rounded-lg border border-border/50 animate-in fade-in duration-200">
+              <label className="block">
+                <span className="text-xs font-semibold text-muted-foreground">Cash Portion (₹)</span>
+                <input
+                  type="number"
+                  value={cashAmount}
+                  onChange={(e) => {
+                    const c = Number(e.target.value) || 0;
+                    setCashAmount(c);
+                    const total = Number(amount) || 0;
+                    setBankAmount(Math.max(0, total - c));
+                  }}
+                  className="mt-1 h-8 w-full rounded-md border border-border bg-surface px-2.5 text-xs focus:outline-none font-semibold"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-muted-foreground">UPI Portion (₹)</span>
+                <input
+                  type="number"
+                  value={bankAmount}
+                  onChange={(e) => {
+                    const b = Number(e.target.value) || 0;
+                    setBankAmount(b);
+                    const total = Number(amount) || 0;
+                    setCashAmount(Math.max(0, total - b));
+                  }}
+                  className="mt-1 h-8 w-full rounded-md border border-border bg-surface px-2.5 text-xs focus:outline-none font-semibold"
+                />
+              </label>
+            </div>
+          )}
+
+          <label className="block">
+            <span className="text-xs font-semibold text-muted-foreground">Remark (optional)</span>
+            <input
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder="e.g. Paid via PhonePe"
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
+            />
+          </label>
+        </div>
+
+        <DialogFooter className="border-t border-border pt-4 flex gap-2">
+          <button
+            onClick={onClose}
+            className="h-9 px-3 rounded-md border border-border bg-surface text-sm hover:bg-accent transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!amount || Number(amount) <= 0}
+            onClick={handleSave}
+            className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-all ml-auto"
+          >
+            Record Payment
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PurchasesPage() {
   const purchases = useMobileStore((s) => s.purchases) || [];
   const suppliers = useMobileStore((s) => s.suppliers) || [];

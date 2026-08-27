@@ -31,6 +31,7 @@ export type SheetName =
   | "Finance_Payments"
   | "Finance_Expenses"
   | "Finance_Investments"
+  | "Finance_ProfitTransactions"
   | "Finance_Staff"
   | "Mobiles_Sales"
   | "Mobiles_Purchases"

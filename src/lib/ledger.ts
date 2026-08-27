@@ -69,7 +69,7 @@ export interface SettleablePurchase {
   id: string;
   date: string;
   amount: number;
-  status: "Paid" | "Outstanding";
+  status: "Paid" | "Outstanding" | "Partial Paid" | "Not Paid" | string;
 }
 
 export interface SupplierSettlement {

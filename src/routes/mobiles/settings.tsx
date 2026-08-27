@@ -166,28 +166,47 @@ function SettingsPage() {
     result.ok ? toast.success("Mobiles data loaded from Google Sheets ✅") : toast.error(`Load failed: ${result.error}`);
   };
 
-  const handleClearMobiles = () => {
+  const handleClearMobiles = async () => {
     if (!confirm("Delete all Jain Mobiles data (sales, products, suppliers, purchases)?")) return;
-    resetMobiles();
-    toast.success("Mobiles module data cleared");
+    setClearing(true);
+    try {
+      await resetMobiles();
+      toast.success("Mobiles module data cleared");
+    } catch (err: any) {
+      toast.error(`Clear failed: ${err?.message || err}`);
+    } finally {
+      setClearing(false);
+    }
   };
 
-  const handleClearFinance = () => {
+  const handleClearFinance = async () => {
     if (!confirm("Delete all Jain Finance data (customers, payments, expenses, investments)?")) return;
-    resetSeed();
-    toast.success("Finance module data cleared");
+    setClearing(true);
+    try {
+      await resetSeed();
+      toast.success("Finance module data cleared");
+    } catch (err: any) {
+      toast.error(`Clear failed: ${err?.message || err}`);
+    } finally {
+      setClearing(false);
+    }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (!confirm("⚠️ WARNING: This will permanently delete ALL data from both Jain Finance AND Jain Mobiles modules.\n\nThis action cannot be undone.\n\nAre you absolutely sure?")) return;
     if (!confirm("Final confirmation: Delete ALL Finance AND Mobiles data now?")) return;
     setClearing(true);
-    setTimeout(() => {
-      resetSeed();
-      resetMobiles();
-      setClearing(false);
+    try {
+      await Promise.all([
+        resetSeed(),
+        resetMobiles(),
+      ]);
       toast.success("All data cleared for both Finance & Mobiles modules");
-    }, 600);
+    } catch (err: any) {
+      toast.error(`Clear failed: ${err?.message || err}`);
+    } finally {
+      setClearing(false);
+    }
   };
 
   const totalFinanceRecords = finCustomers.length + finPayments.length + finExpenses.length + finInvestments.length;
