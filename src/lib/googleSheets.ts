@@ -32,6 +32,7 @@ export type SheetName =
   | "Finance_Expenses"
   | "Finance_Investments"
   | "Finance_ProfitTransactions"
+  | "Finance_Loans"
   | "Finance_Staff"
   | "Mobiles_Sales"
   | "Mobiles_Purchases"
@@ -41,7 +42,9 @@ export type SheetName =
   | "Mobiles_Customers"
   | "Mobiles_Products"
   | "Mobiles_Accessories"
-  | "Mobiles_WarrantyClaims";
+  | "Mobiles_WarrantyClaims"
+  | "Mobiles_Settings"
+  | "Finance_Documents";
 
 /** Generic row — each value is serialised to string in the sheet */
 export type SheetRow = Record<string, string | number | boolean | undefined | null>;
@@ -214,6 +217,62 @@ export async function writeSheet(
     return;
   }
   await writeChunked(url, "write", sheet, rows);
+}
+
+/**
+ * Upload a document file to the Apps Script's Drive folder and return its link.
+ *
+ * Files cannot live in the spreadsheet: a cell holds 50,000 characters and a
+ * scan or photo is far larger, so only the *record* of a document can sync
+ * through a sheet. The bytes go to Drive and the sheet keeps the URL.
+ *
+ * The payload rides in the query string like every other write here (see the
+ * "WHY GET FOR WRITES?" note at the top), so the file is sent as ordered
+ * slices under one uploadId, with the last one flagged to trigger assembly.
+ *
+ * Callers must treat failure as non-fatal: the app keeps the local copy and
+ * carries on exactly as it did before Drive storage existed.
+ */
+export async function uploadFileToDrive(
+  url: string,
+  file: { name: string; mimeType: string; base64: string }
+): Promise<{ fileId: string; url: string }> {
+  if (!file.base64) throw new Error("uploadFileToDrive: empty file");
+
+  // Comfortably under the proven-safe 40 KB the sheet writes already use,
+  // leaving room for the other query parameters on the final request.
+  const SLICE = 30_000;
+  const uploadId = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const total = Math.ceil(file.base64.length / SLICE);
+
+  let result: Record<string, unknown> = {};
+  for (let i = 0; i < total; i++) {
+    const isLast = i === total - 1;
+    const params: Record<string, string> = {
+      action: "driveUpload",
+      uploadId,
+      seq: String(i),
+      payload: file.base64.slice(i * SLICE, (i + 1) * SLICE),
+    };
+    if (isLast) {
+      params.last = "1";
+      params.name = file.name;
+      params.mimeType = file.mimeType;
+    }
+    result = await getFromScript(url, params);
+  }
+
+  const fileId = String(result.fileId ?? "");
+  const fileUrl = String(result.url ?? "");
+  if (!fileId || !fileUrl) throw new Error("Drive upload returned no file link");
+  return { fileId, url: fileUrl };
+}
+
+/** Split a `data:<mime>;base64,<payload>` URL into its parts. */
+export function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } | null {
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl || "");
+  if (!m || !m[2]) return null;
+  return { mimeType: m[1], base64: m[3] };
 }
 
 /**

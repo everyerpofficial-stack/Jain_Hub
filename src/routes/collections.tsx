@@ -174,15 +174,17 @@ function DueListPage() {
     if (!isDateInRange(cDate, startDate, endDate)) return false;
     if (q) {
       const n = q.toLowerCase();
-      return [c.name, c.id, c.mobile, c.village, c.mobileModel].some((v) => v?.toLowerCase().includes(n));
+      return [c.name, c.id, c.mobile, c.village, c.mobileModel].some((v) =>
+        String(v ?? "").toLowerCase().includes(n)
+      );
     }
     return true;
   });
 
   // Sort by mobile number sequentially
   const sortedFiltered = [...filtered].sort((a, b) => {
-    const aMobile = (a.mobile || "").replace(/[^\d]/g, "");
-    const bMobile = (b.mobile || "").replace(/[^\d]/g, "");
+    const aMobile = String(a.mobile ?? "").replace(/[^\d]/g, "");
+    const bMobile = String(b.mobile ?? "").replace(/[^\d]/g, "");
     return aMobile.localeCompare(bMobile);
   });
 

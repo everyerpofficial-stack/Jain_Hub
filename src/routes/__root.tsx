@@ -88,6 +88,18 @@ export function ErrorComponent({ error, reset }: { error: Error; reset: () => vo
             ? "A new version of the app was published. Reloading to update…"
             : "Something went wrong on our end. You can try refreshing or head back home."}
         </p>
+        {/* Without this the page was a dead end: no way for the shop to say
+            what broke, and no way to tell two different faults apart. */}
+        {!chunkError && error?.message && (
+          <details className="mt-4 text-left">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+              Show error details
+            </summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded-md border border-border bg-muted/30 p-3 text-left text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+              {error.message}
+            </pre>
+          </details>
+        )}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
@@ -161,6 +173,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const currentUser = useStore((s) => s.currentUser);
   const recheckStatuses = useStore((s) => s.recheckStatuses);
+  const uploadPendingDocuments = useStore((s) => s.uploadPendingDocuments);
 
   // 🔄 Real-time bidirectional Google Sheets sync — polls every 30s
   useRealtimeSync();
@@ -168,8 +181,11 @@ function RootComponent() {
   useEffect(() => {
     if (currentUser) {
       recheckStatuses();
+      // Retry any document file that hasn't reached Drive yet — a registration
+      // made offline, or before this device had Drive storage available.
+      void uploadPendingDocuments();
     }
-  }, [currentUser, recheckStatuses]);
+  }, [currentUser, recheckStatuses, uploadPendingDocuments]);
 
   // This mount only happens after a successful render, so it's safe to
   // re-arm the one-shot chunk-reload guard for the next deploy.

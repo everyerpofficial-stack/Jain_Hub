@@ -8,6 +8,13 @@ import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
 import { useMobileStore, MobileSupplier } from "@/lib/mobileStore";
 import { settleSupplier } from "@/lib/ledger";
 
+/**
+ * Case/whitespace-insensitive key for matching a supplier by name.
+ * Coerces first: a supplier whose name is all digits comes back from Google
+ * Sheets as a NUMBER, and .trim() on it threw while rendering this page.
+ */
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
 export const Route = createFileRoute("/mobiles/suppliers")({
   head: () => ({
     meta: [
@@ -31,7 +38,7 @@ function SupplierDetailsDialog({
   const supplierPurchases = purchases.filter(
     (p) =>
       p.supplierId === supplier.id ||
-      (p.supplierName && p.supplierName.trim().toLowerCase() === supplier.name.trim().toLowerCase())
+      (!!p.supplierName && norm(p.supplierName) === norm(supplier.name))
   ).sort((a, b) => {
     const da = new Date(a.date).getTime();
     const db = new Date(b.date).getTime();
@@ -42,7 +49,7 @@ function SupplierDetailsDialog({
   const matchedPayments = supplierPayments.filter(
     (pay) =>
       pay.supplierId === supplier.id ||
-      (pay.supplierName && pay.supplierName.trim().toLowerCase() === supplier.name.trim().toLowerCase())
+      (!!pay.supplierName && norm(pay.supplierName) === norm(supplier.name))
   ).sort((a, b) => {
     const da = new Date(a.date).getTime();
     const db = new Date(b.date).getTime();
@@ -539,7 +546,7 @@ function SuppliersPage() {
 
   const combinedSuppliersList: MobileSupplier[] = [...suppliers];
   (purchases || []).forEach((p) => {
-    if (p.supplierName && !combinedSuppliersList.some((s) => s.name.trim().toLowerCase() === p.supplierName.trim().toLowerCase() || s.id === p.supplierId)) {
+    if (p.supplierName && !combinedSuppliersList.some((s) => norm(s.name) === norm(p.supplierName) || s.id === p.supplierId)) {
       combinedSuppliersList.push({
         id: p.supplierId || `MS-${combinedSuppliersList.length + 1}`,
         name: p.supplierName,
@@ -552,10 +559,10 @@ function SuppliersPage() {
 
   const getSupplierStats = (s: MobileSupplier) => {
     const sPurchases = purchases.filter(
-      (p) => p.supplierId === s.id || (p.supplierName && p.supplierName.trim().toLowerCase() === s.name.trim().toLowerCase())
+      (p) => p.supplierId === s.id || (!!p.supplierName && norm(p.supplierName) === norm(s.name))
     );
     const sPayments = supplierPayments.filter(
-      (pay) => pay.supplierId === s.id || (pay.supplierName && pay.supplierName.trim().toLowerCase() === s.name.trim().toLowerCase())
+      (pay) => pay.supplierId === s.id || (!!pay.supplierName && norm(pay.supplierName) === norm(s.name))
     );
 
     // Same rule as the profile dialog. Summing "Paid" purchases AND supplier
@@ -575,7 +582,7 @@ function SuppliersPage() {
   const filtered = combinedSuppliersList.filter((s) => {
     if (q) {
       const text = q.toLowerCase();
-      return [s.name, s.contact, s.id].some((v) => (v || "").toLowerCase().includes(text));
+      return [s.name, s.contact, s.id].some((v) => String(v ?? "").toLowerCase().includes(text));
     }
     return true;
   });

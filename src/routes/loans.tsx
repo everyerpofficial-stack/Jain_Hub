@@ -199,14 +199,27 @@ function LoansPage() {
           const filteredByStatus = loans.filter((l) => l.status === s);
           const total = filteredByStatus.reduce((sum, l) => sum + parseAmount(l.amount), 0);
           const toneVal = s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Completed" ? "neutral" : "danger";
+          const isActiveCard = statusFilter === s;
           return (
-            <Card key={s} className="p-5 cursor-pointer hover:shadow-sm transition-shadow" onClick={() => setStatusFilter(s)}>
+            <Card
+              key={s}
+              // Clicking already set the filter, but nothing on the card said
+              // so and the table is a full screen above it — so the card read
+              // as dead. It now shows the selected state and toggles off.
+              className={`p-5 cursor-pointer transition-shadow hover:shadow-sm ${
+                isActiveCard ? "ring-2 ring-foreground/70 shadow-sm" : ""
+              }`}
+              onClick={() => setStatusFilter(isActiveCard ? "All" : s)}
+            >
               <div className="flex items-center justify-between mb-2">
                 <div className="text-xs text-muted-foreground">{s} loans</div>
                 <Badge tone={toneVal}>{s}</Badge>
               </div>
               <div className="mt-1 text-2xl font-semibold tracking-tight">{filteredByStatus.length}</div>
               <div className="mt-1 text-xs text-muted-foreground">₹{total.toLocaleString("en-IN")} principal</div>
+              <div className="mt-2 text-[11px] font-medium text-muted-foreground/80">
+                {isActiveCard ? "Filtering the list above · click to clear" : "Click to filter the list above"}
+              </div>
             </Card>
           );
         })}

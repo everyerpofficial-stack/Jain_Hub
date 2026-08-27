@@ -432,8 +432,11 @@ function ProductsPage() {
     if (selectedBrand !== "All" && p.brand !== selectedBrand) return false;
     if (q) {
       const matchText = q.toLowerCase();
+      // Coerced, not optional-chained: Sheets hands back a numeric model or
+      // spec as a NUMBER, and .toLowerCase() on it threw mid-render — typing
+      // in this box blanked the whole page.
       return [p.name, p.brand, p.model, p.color, p.ramRom, p.remark].some((field) =>
-        field?.toLowerCase().includes(matchText)
+        String(field ?? "").toLowerCase().includes(matchText)
       );
     }
     return true;

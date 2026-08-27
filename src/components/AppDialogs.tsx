@@ -12,6 +12,7 @@ import {
   REGIONS, calcEmi, calculateEmi, useStore, formatDateToInr, formatDateToYmd,
   VILLAGES_BY_REGION, type Payment, type Expense, type Investment,
 } from "@/lib/store";
+import { readFileForStorage } from "@/lib/imageFile";
 
 // Every key here MUST have a matching dialog rendered in <AppDialogs/> below.
 // "report" used to sit in this union with no component behind it, which is
@@ -208,37 +209,33 @@ function CustomerDialog() {
   const isGuarantyMobileValid = !guarantyMobile.trim() || /^\d{10}$/.test(guarantyMobile.trim());
   const canSubmit = firstName.trim() && isMobileValid && isAadhaarValid && isGuarantyMobileValid && mobileModel && priceNum > 0 && emiDate.trim() && billDate.trim();
 
-  const handleAadhaarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Both uploads go through readFileForStorage, which downscales camera-sized
+  // images. Storing them raw was what exhausted this browser's storage budget
+  // after a few registrations — see imageFile.ts.
+  const handleUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    label: string,
+    apply: (f: { name: string; url: string; size: string }) => void
+  ) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAadhaarFile({
-          name: file.name,
-          size: `${(file.size / 1024).toFixed(0)} KB`,
-          url: reader.result as string,
-        });
-        toast.success(`Aadhaar Xerox uploaded: ${file.name}`);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    try {
+      const stored = await readFileForStorage(file);
+      apply(stored);
+      toast.success(`${label} uploaded: ${file.name}`, { description: `Stored as ${stored.size}` });
+    } catch (err) {
+      console.error(`[CustomerDialog] ${label} upload failed:`, err);
+      toast.error(`Could not read ${file.name}`, {
+        description: err instanceof Error ? err.message : "Please try a different file.",
+      });
     }
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoFile({
-          name: file.name,
-          size: `${(file.size / 1024).toFixed(0)} KB`,
-          url: reader.result as string,
-        });
-        toast.success(`Customer Photo uploaded: ${file.name}`);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  const handleAadhaarUpload = (e: React.ChangeEvent<HTMLInputElement>) =>
+    void handleUpload(e, "Aadhaar Xerox", setAadhaarFile);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) =>
+    void handleUpload(e, "Customer Photo", setPhotoFile);
 
   return (
     <Dialog open={open === "customer"} onOpenChange={(o) => !o && close()}>
@@ -414,26 +411,37 @@ function CustomerDialog() {
             <PrimaryBtn
               disabled={!canSubmit}
               onClick={() => {
-                const c = addCustomer({
-                  firstName: firstName.trim(),
-                  fatherName: fatherName.trim(),
-                  surname: surname.trim(),
-                  mobile: mobile.trim(),
-                  aadhaar: aadhaar.trim(),
-                  guarantyName: guarantyName.trim(),
-                  guarantyMobile: guarantyMobile.trim(),
-                  region, village,
-                  mobileBrand, mobileModel, ramRom,
-                  imei1: imei1.trim(), imei2: imei2.trim(),
-                  price: priceNum, deposit: depositNum,
-                  interestRate: interestNum, noOfEmi: emiCount,
-                  emiDate: formatDateToInr(emiDate),
-                  billDate: formatDateToInr(billDate),
-                  fileCharge: fileChargeNum,
-                  aadhaarFile,
-                  photoFile,
-                });
-                toast.success(`Customer ${c.id} registered — ${mobileBrand} ${mobileModel}`);
+                // Anything that throws in here (a bad record already in the
+                // store, a full localStorage) used to abort before close(),
+                // leaving the dialog stuck open with no explanation. Report
+                // the failure and always let the user out of the form.
+                try {
+                  const c = addCustomer({
+                    firstName: firstName.trim(),
+                    fatherName: fatherName.trim(),
+                    surname: surname.trim(),
+                    mobile: mobile.trim(),
+                    aadhaar: aadhaar.trim(),
+                    guarantyName: guarantyName.trim(),
+                    guarantyMobile: guarantyMobile.trim(),
+                    region, village,
+                    mobileBrand, mobileModel, ramRom,
+                    imei1: imei1.trim(), imei2: imei2.trim(),
+                    price: priceNum, deposit: depositNum,
+                    interestRate: interestNum, noOfEmi: emiCount,
+                    emiDate: formatDateToInr(emiDate),
+                    billDate: formatDateToInr(billDate),
+                    fileCharge: fileChargeNum,
+                    aadhaarFile,
+                    photoFile,
+                  });
+                  toast.success(`Customer ${c.id} registered — ${mobileBrand} ${mobileModel}`);
+                } catch (err) {
+                  console.error("[CustomerDialog] registration failed:", err);
+                  toast.error("Could not register the customer", {
+                    description: err instanceof Error ? err.message : "Please try again.",
+                  });
+                }
                 close();
               }}
             >

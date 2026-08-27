@@ -36,6 +36,27 @@ const BACKOFF_MS = [600, 1800];
  */
 const SETTLE_MS = 6_000;
 
+/**
+ * Sheets the Apps Script has told us it will not accept.
+ *
+ * A tab that is missing from ALLOWED_SHEETS in Code.gs fails instantly and
+ * identically every time — retrying it is pointless, and the poller re-offers
+ * every un-synced local record every 20s, so without this the user gets an
+ * error toast per record per poll, forever. Fail it once, say what to do
+ * about it, then stay quiet for the rest of the session.
+ */
+const unavailableSheets = new Set<string>();
+
+/** True if the deployed Apps Script has rejected this sheet as not allowed. */
+export function isSheetUnavailable(sheet: string): boolean {
+  return unavailableSheets.has(sheet);
+}
+
+function isSheetNotAllowed(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /sheet not allowed/i.test(msg);
+}
+
 /** In-flight write count per sheet. */
 const inFlight = new Map<string, number>();
 /** Timestamp (ms) when a sheet's last write settled. */
@@ -77,6 +98,9 @@ export function enqueueWrite(
   inFlight.set(sheet, (inFlight.get(sheet) ?? 0) + 1);
 
   const attempt = async (): Promise<boolean> => {
+    // Already known-rejected by the deployed script — don't retry or re-toast.
+    if (unavailableSheets.has(sheet)) return false;
+
     let lastErr: unknown;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       try {
@@ -84,11 +108,25 @@ export function enqueueWrite(
         return true;
       } catch (err) {
         lastErr = err;
+        // A tab the script doesn't whitelist will never succeed — retrying
+        // just multiplies the noise.
+        if (isSheetNotAllowed(err)) break;
         // Nothing to retry against while the device is offline — fail fast
         // and let the user know rather than burning the backoff budget.
         if (isOffline()) break;
         if (i < MAX_ATTEMPTS - 1) await sleep(BACKOFF_MS[i] ?? 1800);
       }
+    }
+
+    if (isSheetNotAllowed(lastErr)) {
+      unavailableSheets.add(sheet);
+      console.error(`[SyncQueue] ${sheet} is not whitelisted by the deployed Apps Script.`);
+      toast.error(`Google Sheet "${sheet}" is not set up yet`, {
+        description:
+          "Re-deploy the Apps Script (Code.gs) from this project so it accepts this tab. Until then these records are saved on this device only.",
+        duration: 12000,
+      });
+      return false;
     }
 
     const detail = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "");

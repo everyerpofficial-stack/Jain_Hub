@@ -22,11 +22,13 @@ export const Route = createFileRoute("/mobiles/inventory")({
 function InventoryPage() {
   const inventory = useMobileStore((s) => s.inventory) || [];
   const [q, setQ] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"All" | "In Stock" | "Low Stock">("All");
+  const [filterStatus, setFilterStatus] = useState<"All" | "In Stock" | "Low Stock" | "Out of Stock">("All");
 
   const filtered = (inventory || []).filter((item) => {
     if (!item) return false;
-    if (item.quantity <= 0) return false;
+    // Zero-quantity rows used to be dropped here unconditionally, so the page
+    // read "0 Stock Records" with no way to tell an empty catalogue from a
+    // sold-out one. They are a filter option now instead of invisible.
     if (filterStatus !== "All" && item.status !== filterStatus) return false;
     if (q) {
       const text = q.toLowerCase();
@@ -57,9 +59,10 @@ function InventoryPage() {
       </div>
 
       {/* Metrics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <StatCard label="Total Physical Stock" value={totalQuantity.toString()} sub="Units in store room" icon={<Layers className="size-4" />} />
         <StatCard label="Low Stock Models" value={lowStockCount.toString()} sub="Requires inward orders" icon={<AlertCircle className="size-4" />} trend={lowStockCount > 0 ? "warn" : undefined} />
+        <StatCard label="Stock Valuation" value={formatInr(totalValuationCost)} sub="At purchase cost" icon={<Layers className="size-4" />} />
       </div>
 
       {/* Low stock alert box */}
@@ -87,7 +90,7 @@ function InventoryPage() {
               className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
             />
           </div>
-          {(["All", "In Stock", "Low Stock"] as const).map((status) => (
+          {(["All", "In Stock", "Low Stock", "Out of Stock"] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
@@ -126,7 +129,9 @@ function InventoryPage() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-12 text-center text-muted-foreground font-medium">
-                    No stock records found matching filters.
+                    {inventory.length === 0
+                      ? "No products in the catalogue yet — add products, then log a purchase to bring stock in."
+                      : "No stock records found matching filters."}
                   </td>
                 </tr>
               ) : (

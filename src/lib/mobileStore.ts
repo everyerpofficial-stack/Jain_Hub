@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { formatDateToInr } from "./store";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { safeLocalStorage } from "./safeStorage";
+import { formatDateToInr, parseAppDate } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
 import { enqueueWrite, markIdDeleted } from "./syncQueue";
@@ -52,6 +53,24 @@ export function getBrandsForCategory(category: string): string[] {
   const trimmed = category.trim();
   if (BRANDS_BY_CATEGORY[trimmed]) return BRANDS_BY_CATEGORY[trimmed];
   return DEFAULT_BRANDS_FALLBACK;
+}
+
+/**
+ * Line items for a record just read back from Google Sheets.
+ *
+ * Recovery path: an earlier version of the realtime poller re-uploaded raw
+ * in-memory records, so a sale's/purchase's `items` array reached the sheet as
+ * the string "[object Object]" and the per-product breakdown on that row was
+ * destroyed — which is why purchased units stopped reaching stock. Those rows
+ * still exist on the sheet. When the sheet copy is unusable but this device
+ * still holds a good local copy of the same record, keep the local items
+ * rather than letting the damaged row overwrite them.
+ */
+export function itemsFromSheet(raw: any, localItems: any): any[] {
+  const parsed = safeItems(raw);
+  if (parsed.length > 0) return parsed;
+  const local = safeItems(localItems);
+  return local.length > 0 ? local : [];
 }
 
 /** Safely parse items field whether it's an array, a JSON string from Google Sheets, or undefined */
@@ -270,6 +289,8 @@ interface MobilesState {
   
   adjustStock: (productId: string, qtyChange: number) => void;
   stockIn: (productId: string, quantity: number, cost: number) => void;
+  /** Rebuild every inventory row from products + purchases − sales. */
+  recomputeInventory: () => void;
   
   addSupplier: (s: Omit<MobileSupplier, "id" | "outstanding">) => void;
   updateSupplier: (id: string, s: Partial<MobileSupplier>) => void;
@@ -335,6 +356,95 @@ const getQtyStatus = (qty: number, minLimit: number): "In Stock" | "Low Stock" |
   return "In Stock";
 };
 
+/**
+ * Rebuild the entire inventory table from the records that actually move
+ * stock: one row per product, quantity = (units purchased − units sold).
+ *
+ * Inventory rows used to be created ONLY by addProduct() and changed ONLY by
+ * adjustStock(), and there is no inventory sheet — so the moment a browser got
+ * its product catalogue from Google Sheets instead of from its own addProduct()
+ * calls (a second device, or this one after its local storage was cleared or
+ * reset), those products had NO inventory row at all. adjustStock() then
+ * matched nothing on every purchase, the units went nowhere, and the shop was
+ * left with Inventory showing "0 stock records", every product "Out of Stock",
+ * and every option in the sales dropdown disabled — while the purchase log
+ * happily showed the units as received.
+ *
+ * Deriving the quantity instead of storing it means any device can reproduce
+ * it from the purchase/sale ledgers (which DO sync), and a device that starts
+ * from a bad or empty inventory heals itself on the next recompute.
+ */
+function buildInventory(
+  products: MobileProduct[],
+  purchases: MobilePurchase[],
+  sales: MobileSale[],
+  existing: MobileInventoryItem[]
+): MobileInventoryItem[] {
+  const purchasedQty = new Map<string, number>();
+  const soldQty = new Map<string, number>();
+  // Unit cost from the most recent purchase that included the product.
+  const latestCost = new Map<string, { cost: number; time: number }>();
+
+  (purchases || []).forEach((pur, idx) => {
+    if (!pur) return;
+    // Older/newer ordering differs between locally-added (newest first) and
+    // sheet-loaded (append order) lists, so rank on the parsed date and only
+    // fall back to array position when two dates tie.
+    const parsed = parseAppDate(typeof pur.date === "string" ? pur.date : String(pur.date ?? ""));
+    const time = (parsed ? parsed.getTime() : 0) - idx / 1e6;
+    safeItems<{ productId?: string; quantity?: number; cost?: number }>(pur.items).forEach((item) => {
+      const pid = String(item?.productId || "");
+      if (!pid) return;
+      const qty = Number(item?.quantity) || 0;
+      purchasedQty.set(pid, (purchasedQty.get(pid) ?? 0) + qty);
+      const cost = Number(item?.cost) || 0;
+      const prev = latestCost.get(pid);
+      if (cost > 0 && (!prev || time > prev.time)) latestCost.set(pid, { cost, time });
+    });
+  });
+
+  (sales || []).forEach((sale) => {
+    if (!sale) return;
+    safeItems<{ productId?: string; quantity?: number }>(sale.items).forEach((item) => {
+      const pid = String(item?.productId || "");
+      if (!pid) return;
+      soldQty.set(pid, (soldQty.get(pid) ?? 0) + (Number(item?.quantity) || 0));
+    });
+  });
+
+  const byProductId = new Map((existing || []).filter(Boolean).map((inv) => [String(inv.productId), inv]));
+  const usedIds = new Set<string>();
+
+  return (products || []).filter(Boolean).map((p) => {
+    const pid = String(p.id);
+    const prev = byProductId.get(pid);
+    // Never reuse an id another row already claimed — duplicate keys in the
+    // persisted list would otherwise collide in React and in every lookup.
+    let id = prev?.id;
+    if (!id || usedIds.has(id)) id = nextSeqId("INV-", [...usedIds]);
+    usedIds.add(id);
+
+    const quantity = Math.max(0, (purchasedQty.get(pid) ?? 0) - (soldQty.get(pid) ?? 0));
+    const minLimit = Number(prev?.minLimit);
+    const limit = Number.isFinite(minLimit) && minLimit > 0 ? minLimit : 3;
+    const purchasePrice = latestCost.get(pid)?.cost ?? (Number(p.purchasePrice) || 0);
+    const sellingPrice = Number(p.sellingPrice) || Number(prev?.sellingPrice) || 0;
+
+    return {
+      id,
+      productId: pid,
+      productName: p.name,
+      brand: p.brand,
+      quantity,
+      minLimit: limit,
+      purchasePrice,
+      sellingPrice,
+      profitMargin: sellingPrice - purchasePrice,
+      status: getQtyStatus(quantity, limit),
+    };
+  });
+}
+
 // Seed Mock Data
 const initialProducts: MobileProduct[] = [];
 const initialInventory: MobileInventoryItem[] = [];
@@ -374,7 +484,7 @@ const defaultSettings: MobileSettings = {
 // Single source of truth for how each entity maps to its sheet's columns —
 // used both by the full-table syncToSheets() below and by the per-record
 // upsert/delete calls each mutator makes, so the two paths can't drift.
-function saleRow(s: MobileSale): SheetRow {
+export function saleRow(s: MobileSale): SheetRow {
   return {
     id: s.id,
     customerName: s.customerName,
@@ -395,7 +505,7 @@ function saleRow(s: MobileSale): SheetRow {
     items: JSON.stringify(s.items || []),
   };
 }
-function purchaseRow(p: MobilePurchase): SheetRow {
+export function purchaseRow(p: MobilePurchase): SheetRow {
   const pStatus = p.paymentStatus || (p.status === "Paid" ? "Paid" : p.status === "Partial Paid" ? "Partial Paid" : "Not Paid");
   const paid = p.amountPaid !== undefined ? p.amountPaid : (pStatus === "Paid" ? p.amount : 0);
   const due = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.amount - paid);
@@ -414,7 +524,7 @@ function purchaseRow(p: MobilePurchase): SheetRow {
     items: JSON.stringify(p.items || []),
   };
 }
-function mobileExpenseRow(e: MobileExpense): SheetRow {
+export function mobileExpenseRow(e: MobileExpense): SheetRow {
   return {
     id: e.id, date: e.date, cat: e.cat, desc: e.desc,
     amount: e.amount, type: e.type ?? "Expense", paymentMode: e.paymentMode ?? "Cash",
@@ -422,13 +532,15 @@ function mobileExpenseRow(e: MobileExpense): SheetRow {
     bankAmount: e.bankAmount ?? "",
   };
 }
-function supplierRow(s: MobileSupplier): SheetRow {
+export function supplierRow(s: MobileSupplier): SheetRow {
   return {
     id: s.id, name: s.name, gstNo: s.gstNo ?? "", contact: s.contact,
+    // email was missing from the row and was lost on every sheet round-trip.
+    email: s.email ?? "",
     address: s.address, outstanding: s.outstanding,
   };
 }
-function supplierPaymentRow(p: SupplierPayment): SheetRow {
+export function supplierPaymentRow(p: SupplierPayment): SheetRow {
   return {
     // supplierId was omitted, so after a reload payments could only be matched
     // back to a vendor by name — renaming a supplier detached their history.
@@ -439,7 +551,7 @@ function supplierPaymentRow(p: SupplierPayment): SheetRow {
     bankAmount: p.bankAmount ?? "",
   };
 }
-function mobileCustomerRow(c: MobileCustomer): SheetRow {
+export function mobileCustomerRow(c: MobileCustomer): SheetRow {
   return {
     id: c.id, name: c.name, mobile: c.mobile, email: c.email,
     address: c.address, registeredDate: c.registeredDate,
@@ -448,14 +560,18 @@ function mobileCustomerRow(c: MobileCustomer): SheetRow {
     isBlacklisted: c.isBlacklisted ? "true" : "false",
   };
 }
-function productRow(p: MobileProduct): SheetRow {
+export function productRow(p: MobileProduct): SheetRow {
   return {
     id: p.id, name: p.name, brand: p.brand, model: p.model,
     color: p.color, ramRom: p.ramRom, category: p.category,
     purchasePrice: p.purchasePrice, sellingPrice: p.sellingPrice ?? 0, status: p.status,
+    // These were absent from the row, so every sheet round-trip silently
+    // erased them from the catalogue. (`image` stays out on purpose — it can
+    // be a base64 data URL, far past what a single cell will hold.)
+    warranty: p.warranty ?? "", barcode: p.barcode ?? "", remark: p.remark ?? "",
   };
 }
-function accessoryRow(a: MobileAccessory): SheetRow {
+export function accessoryRow(a: MobileAccessory): SheetRow {
   return {
     id: a.id, name: a.name, category: a.category,
     stock: a.stock, minLimit: a.minLimit,
@@ -463,7 +579,21 @@ function accessoryRow(a: MobileAccessory): SheetRow {
     status: a.status,
   };
 }
-function warrantyRow(w: MobileWarrantyClaim): SheetRow {
+/**
+ * The shop profile is a single record, so it occupies one fixed-id row.
+ * It prints on every sales invoice and purchase bill, yet it used to live
+ * only in the browser it was typed into — a second device kept showing the
+ * seeded placeholder name and GST number on customer-facing paperwork.
+ */
+export const MOBILE_SETTINGS_ROW_ID = "MOBILE_SETTINGS";
+export function mobileSettingsRow(s: MobileSettings): SheetRow {
+  return {
+    id: MOBILE_SETTINGS_ROW_ID,
+    storeName: s.storeName || "", gstNo: s.gstNo || "", contact: s.contact || "",
+    email: s.email || "", address: s.address || "", invoicePrefix: s.invoicePrefix || "",
+  };
+}
+export function warrantyRow(w: MobileWarrantyClaim): SheetRow {
   return {
     id: w.id, customerName: w.customerName, mobile: w.customerMobile || "",
     productName: w.productName, imei: w.imei, claimDate: w.claimDate,
@@ -551,7 +681,9 @@ export const useMobileStore = create<MobilesState>()(
           products: [...state.products, newProduct],
           inventory: [...state.inventory, newInvItem]
         }));
-        // Inventory has no sheet of its own — only the product row syncs.
+        // Inventory has no sheet of its own — only the product row syncs; the
+        // quantities are re-derived from the purchase/sale ledgers instead.
+        get().recomputeInventory();
         syncUpsert(get, "Mobiles_Products", productRow(newProduct), "product add");
       },
 
@@ -577,6 +709,7 @@ export const useMobileStore = create<MobilesState>()(
           });
           return { products, inventory };
         });
+        get().recomputeInventory();
         const updatedProduct = get().products.find((p) => p.id === id);
         if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product update");
       },
@@ -589,11 +722,46 @@ export const useMobileStore = create<MobilesState>()(
         syncDelete(get, "Mobiles_Products", id, "product delete");
       },
 
+      recomputeInventory: () => {
+        set((state) => {
+          const inventory = buildInventory(state.products, state.purchases, state.sales, state.inventory);
+          const statusByProduct = new Map(inventory.map((inv) => [inv.productId, inv.status]));
+          const products = state.products.map((p) =>
+            p && statusByProduct.has(p.id) ? { ...p, status: statusByProduct.get(p.id)! } : p
+          );
+          return { inventory, products };
+        });
+      },
+
       adjustStock: (productId, qtyChange) => {
         set((state) => {
-          const inventory = state.inventory.map((inv) => {
+          // A product with no inventory row (catalogue pulled from Sheets on a
+          // fresh device) used to swallow the movement silently. Create the row
+          // on demand so the units land somewhere.
+          const hasRow = state.inventory.some((inv) => inv && inv.productId === productId);
+          const product = state.products.find((p) => p && p.id === productId);
+          let base = state.inventory;
+          if (!hasRow && product) {
+            base = [
+              ...state.inventory,
+              {
+                id: nextSeqId("INV-", state.inventory.map((x) => x.id)),
+                productId,
+                productName: product.name,
+                brand: product.brand,
+                quantity: 0,
+                minLimit: 3,
+                purchasePrice: Number(product.purchasePrice) || 0,
+                sellingPrice: Number(product.sellingPrice) || 0,
+                profitMargin: (Number(product.sellingPrice) || 0) - (Number(product.purchasePrice) || 0),
+                status: "Out of Stock" as const,
+              },
+            ];
+          }
+
+          const inventory = base.map((inv) => {
             if (inv.productId === productId) {
-              const quantity = Math.max(0, inv.quantity + qtyChange);
+              const quantity = Math.max(0, (Number(inv.quantity) || 0) + qtyChange);
               const status = getQtyStatus(quantity, inv.minLimit);
               return { ...inv, quantity, status };
             }
@@ -601,7 +769,7 @@ export const useMobileStore = create<MobilesState>()(
           });
 
           const products = state.products.map((p) => {
-            if (p.id === productId) {
+            if (p && p.id === productId) {
               const invItem = inventory.find((inv) => inv.productId === productId);
               return { ...p, status: invItem ? invItem.status : p.status };
             }
@@ -647,7 +815,10 @@ export const useMobileStore = create<MobilesState>()(
       },
 
       paySupplier: (id, amount, date, remark, paymentMode = "Cash", cashAmount, bankAmount) => {
-        const supplier = get().suppliers.find((s) => s.id === id || s.name.trim().toLowerCase() === id.trim().toLowerCase());
+        const idKey = String(id ?? "").trim().toLowerCase();
+        const supplier = get().suppliers.find(
+          (s) => s.id === id || String(s?.name ?? "").trim().toLowerCase() === idKey
+        );
         if (!supplier) return;
         const newPayment: SupplierPayment = {
           id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
@@ -698,7 +869,10 @@ export const useMobileStore = create<MobilesState>()(
         const status = paymentStatus;
 
         let supplier = get().suppliers.find(
-          (s) => s.id === pur.supplierId || (pur.supplierName && s.name.trim().toLowerCase() === pur.supplierName.trim().toLowerCase())
+          (s) =>
+            s.id === pur.supplierId ||
+            (!!pur.supplierName &&
+              String(s?.name ?? "").trim().toLowerCase() === String(pur.supplierName).trim().toLowerCase())
         );
 
         if (!supplier && pur.supplierName) {
@@ -766,6 +940,11 @@ export const useMobileStore = create<MobilesState>()(
           purchases: [newPurchase, ...state.purchases]
         }));
 
+        // Re-derive from the ledger now that this bill is recorded, so the
+        // stock figure matches the invoices even if the incremental
+        // adjustStock() calls above had nothing to increment.
+        get().recomputeInventory();
+
         syncUpsert(get, "Mobiles_Purchases", purchaseRow(newPurchase), "purchase");
         
         pur.items.forEach((item) => {
@@ -807,7 +986,10 @@ export const useMobileStore = create<MobilesState>()(
           paymentStatus: newPaymentStatus,
         };
 
-        const supplier = get().suppliers.find((s) => s.id === purchase.supplierId || s.name.trim().toLowerCase() === (purchase.supplierName || "").trim().toLowerCase());
+        const supplierKey = String(purchase.supplierName || "").trim().toLowerCase();
+        const supplier = get().suppliers.find(
+          (s) => s.id === purchase.supplierId || String(s?.name ?? "").trim().toLowerCase() === supplierKey
+        );
         if (supplier) {
           set((state) => ({
             suppliers: state.suppliers.map((s) =>
@@ -896,6 +1078,8 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           sales: [newSale, ...state.sales]
         }));
+
+        get().recomputeInventory();
 
         // addCustomer() above already syncs itself when it creates a new customer.
         syncUpsert(get, "Mobiles_Sales", saleRow(newSale), "sale");
@@ -1041,6 +1225,7 @@ export const useMobileStore = create<MobilesState>()(
 
       updateSettings: (updatedSettings) => {
         set((state) => ({ settings: { ...state.settings, ...updatedSettings } }));
+        syncUpsert(get, "Mobiles_Settings", mobileSettingsRow(get().settings), "store profile");
       },
 
       addExpense: (input) => {
@@ -1107,6 +1292,7 @@ export const useMobileStore = create<MobilesState>()(
               writeSheet(sheetsConfig.url, "Mobiles_Products", []),
               writeSheet(sheetsConfig.url, "Mobiles_Accessories", []),
               writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", []),
+              writeSheet(sheetsConfig.url, "Mobiles_Settings", []),
             ]);
             const ts = nowTimestamp();
             set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
@@ -1133,6 +1319,7 @@ export const useMobileStore = create<MobilesState>()(
           await writeSheet(sheetsConfig.url, "Mobiles_Products", products.map(productRow));
           await writeSheet(sheetsConfig.url, "Mobiles_Accessories", accessories.map(accessoryRow));
           await writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", warranties.map(warrantyRow));
+          await writeSheet(sheetsConfig.url, "Mobiles_Settings", [mobileSettingsRow(get().settings)]);
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -1147,7 +1334,7 @@ export const useMobileStore = create<MobilesState>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          const [salesRows, expRows, supRows, supPayRows, custRows, prodRows, purRows, accRows, warRows] = await Promise.all([
+          const [salesRows, expRows, supRows, supPayRows, custRows, prodRows, purRows, accRows, warRows, setRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Mobiles_Sales"),
             readSheet(sheetsConfig.url, "Mobiles_Expenses"),
             readSheet(sheetsConfig.url, "Mobiles_Suppliers"),
@@ -1157,14 +1344,11 @@ export const useMobileStore = create<MobilesState>()(
             readSheet(sheetsConfig.url, "Mobiles_Purchases"),
             readSheet(sheetsConfig.url, "Mobiles_Accessories"),
             readSheet(sheetsConfig.url, "Mobiles_WarrantyClaims"),
+            readSheet(sheetsConfig.url, "Mobiles_Settings"),
           ]);
+          const localSalesById = new Map(get().sales.map((x) => [String(x?.id), x]));
           const sanitizedSales = salesRows.map((r: any) => {
-            let parsedItems = [];
-            if (Array.isArray(r.items)) {
-              parsedItems = r.items;
-            } else if (typeof r.items === "string" && r.items.trim()) {
-              try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
-            }
+            const parsedItems = itemsFromSheet(r.items, localSalesById.get(String(r.id))?.items);
             return {
               ...r,
               subtotal: Number(r.subtotal) || Number(r.totalAmount) || 0,
@@ -1180,7 +1364,15 @@ export const useMobileStore = create<MobilesState>()(
           set({ sales: sanitizedSales as unknown as MobileSale[] });
 
           if (expRows.length > 0 || get().expenses.length === 0) set({ expenses: expRows as unknown as MobileExpense[] });
-          if (supRows.length > 0 || get().suppliers.length === 0) set({ suppliers: supRows as unknown as MobileSupplier[] });
+          const sanitizedSuppliers = supRows.map((r: any) => ({
+            ...r,
+            name: String(r.name ?? ""),
+            contact: String(r.contact ?? ""),
+            gstNo: String(r.gstNo ?? ""),
+            address: String(r.address ?? ""),
+            outstanding: Number(r.outstanding) || 0,
+          }));
+          if (supRows.length > 0 || get().suppliers.length === 0) set({ suppliers: sanitizedSuppliers as unknown as MobileSupplier[] });
 
           // Sanitise supplier payments — paymentMode must survive the Sheets
           // round-trip or splitByMethod defaults every payment to bank/UPI.
@@ -1211,18 +1403,29 @@ export const useMobileStore = create<MobilesState>()(
           }));
           if (custRows.length > 0 || get().customers.length === 0) set({ customers: sanitizedCustomers as unknown as MobileCustomer[] });
 
-          if (prodRows.length > 0 || get().products.length === 0) set({ products: prodRows as unknown as MobileProduct[] });
+          // Same coercion the realtime poller applies: a numeric model/spec
+          // comes back as a NUMBER and .toLowerCase() on it crashed the
+          // Products page the moment anything was typed in its search box.
+          const sanitizedProducts = prodRows.map((r: any) => ({
+            ...r,
+            name: String(r.name ?? ""),
+            brand: String(r.brand ?? ""),
+            model: String(r.model ?? ""),
+            color: String(r.color ?? ""),
+            ramRom: String(r.ramRom ?? ""),
+            category: String(r.category ?? ""),
+            remark: String(r.remark ?? ""),
+            purchasePrice: Number(r.purchasePrice) || 0,
+            sellingPrice: Number(r.sellingPrice) || 0,
+          }));
+          if (prodRows.length > 0 || get().products.length === 0) set({ products: sanitizedProducts as unknown as MobileProduct[] });
 
           // Sanitise purchases — amount/quantity must be numbers for
           // settleSupplier arithmetic, and paymentMode must be normalised
           // so splitByMethod routes cash payments correctly.
+          const localPurchasesById = new Map(get().purchases.map((x) => [String(x?.id), x]));
           const sanitizedPurchases = purRows.map((r: any) => {
-            let parsedItems = [];
-            if (Array.isArray(r.items)) {
-              parsedItems = r.items;
-            } else if (typeof r.items === "string" && r.items.trim()) {
-              try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
-            }
+            const parsedItems = itemsFromSheet(r.items, localPurchasesById.get(String(r.id))?.items);
             const mode = String(r.paymentMode || "").trim();
             const normalizedMode =
               mode === "Cash" ? "Cash"
@@ -1267,6 +1470,25 @@ export const useMobileStore = create<MobilesState>()(
 
           set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
 
+          const savedSettings = setRows.find((r: any) => String(r?.id) === MOBILE_SETTINGS_ROW_ID);
+          if (savedSettings) {
+            set((st) => ({
+              settings: {
+                ...st.settings,
+                storeName: String(savedSettings.storeName ?? st.settings.storeName),
+                gstNo: String(savedSettings.gstNo ?? st.settings.gstNo),
+                contact: String(savedSettings.contact ?? st.settings.contact),
+                email: String(savedSettings.email ?? st.settings.email),
+                address: String(savedSettings.address ?? st.settings.address),
+                invoicePrefix: String(savedSettings.invoicePrefix ?? st.settings.invoicePrefix),
+              },
+            }));
+          }
+
+          // Products/purchases/sales were just replaced wholesale; the local
+          // inventory table refers to the old ones until it is rebuilt.
+          get().recomputeInventory();
+
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -1277,6 +1499,8 @@ export const useMobileStore = create<MobilesState>()(
     }),
     {
       name: "jain-mobiles-erp-v2",
+      // Never let a full/blocked localStorage throw out of set() — see safeStorage.
+      storage: createJSONStorage(() => safeLocalStorage),
       merge: (persistedState: any, currentState) => {
         const merged = { ...currentState, ...(persistedState || {}) };
         merged.products = Array.isArray(merged.products) ? merged.products : initialProducts;
@@ -1300,6 +1524,12 @@ export const useMobileStore = create<MobilesState>()(
           enabled: merged.sheetsConfig?.enabled ?? true,
           lastSync: merged.sheetsConfig?.lastSync,
         };
+        merged.inventory = buildInventory(
+          merged.products,
+          merged.purchases,
+          merged.sales,
+          merged.inventory
+        );
         return merged;
       }
     }

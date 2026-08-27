@@ -11,10 +11,19 @@
  */
 
 import { useEffect, useRef } from "react";
-import { useStore } from "./store";
-import { useMobileStore } from "./mobileStore";
-import { digestSheets, readSheet, upsertRow, type SheetName } from "./googleSheets";
-import { isSheetBusy, isIdDeleted } from "./syncQueue";
+import {
+  useStore, recalculateLoanStatuses,
+  loanRow, profitTransactionRow, customerRow, paymentRow, documentRow,
+} from "./store";
+import {
+  useMobileStore,
+  saleRow, purchaseRow, productRow, supplierRow, mobileCustomerRow,
+  mobileExpenseRow, accessoryRow, supplierPaymentRow, warrantyRow,
+  itemsFromSheet, safeItems,
+  mobileSettingsRow, MOBILE_SETTINGS_ROW_ID,
+} from "./mobileStore";
+import { digestSheets, readSheet, upsertRow, type SheetName, type SheetRow } from "./googleSheets";
+import { isSheetBusy, isIdDeleted, isSheetUnavailable } from "./syncQueue";
 import { toOptionalNumber } from "./ledger";
 import { toast } from "sonner";
 
@@ -65,14 +74,42 @@ function safeReconcile<T extends { id: string }>(
   rows: T[],
   localList: T[],
   setter: (fn: (s: any) => any) => void,
-  key: string
+  key: string,
+  /**
+   * Serialiser for records this device uploads back to the sheet.
+   *
+   * This used to push the raw in-memory record. For sales and purchases that
+   * record carries `items` as a real array, which a spreadsheet cell cannot
+   * hold — it landed as "[object Object]" and permanently destroyed the line
+   * items on that invoice, which is what left purchased units invisible to
+   * stock. Always upload through the same row builder the mutators use.
+   */
+  // Deliberately loose: callers pass the domain row builders (saleRow,
+  // purchaseRow, ...) while `rows` here are sanitised sheet rows, so the two
+  // sides never line up nominally.
+  toRow: (item: any) => SheetRow = (item) => item as SheetRow
 ) {
+  const push = (item: T) => {
+    // The deployed script rejects this tab outright — re-offering every local
+    // record on every 20s poll would just spam failures.
+    if (isSheetUnavailable(sheet)) return;
+    try {
+      // .catch is required, not decorative: a rejected upsert here is an
+      // unhandled promise rejection that surfaces as a hard error in the tab.
+      void upsertRow(url, sheet, toRow(item)).catch((err) => {
+        console.warn(`[RealtimeSync] Could not re-upload ${sheet} row ${item?.id}:`, err);
+      });
+    } catch (err) {
+      console.warn(`[RealtimeSync] Could not serialise ${sheet} row ${item?.id}:`, err);
+    }
+  };
+
   // 1. If sheet returns 0 rows but local list has data:
   // DO NOT wipe local list! Preserve local data and upload local items to Google Sheets.
   if (rows.length === 0 && localList.length > 0) {
     for (const item of localList) {
       if (item && item.id && !isIdDeleted(sheet, String(item.id))) {
-        void upsertRow(url, sheet, item as any);
+        push(item);
       }
     }
     return;
@@ -92,7 +129,7 @@ function safeReconcile<T extends { id: string }>(
       if (!isIdDeleted(sheet, idStr)) {
         merged.push(loc);
         // Upload un-synced local record to Google Sheets
-        void upsertRow(url, sheet, loc as any);
+        push(loc);
       }
     }
   }
@@ -215,6 +252,16 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
       if (sheet === "Finance_Customers") {
         const sanitized = rows.map((r: any) => ({
           ...r,
+          // Sheets stores a 10-digit mobile / 12-digit Aadhaar as a NUMBER.
+          // Every customer + due-list search calls .toLowerCase() on these,
+          // which throws on a number and blanks the whole page.
+          name: String(r.name ?? ""),
+          mobile: String(r.mobile ?? ""),
+          aadhaar: String(r.aadhaar ?? ""),
+          guarantyMobile: String(r.guarantyMobile ?? ""),
+          village: String(r.village ?? ""),
+          emiDate: String(r.emiDate ?? ""),
+          billDate: String(r.billDate ?? ""),
           price: Number(r.price) || 0,
           fileCharge: Number(r.fileCharge) || 0,
           deposit: Number(r.deposit) || 0,
@@ -231,7 +278,7 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
           lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
           missedEmis: Number(r.missedEmis) || 0,
         }));
-        safeReconcile(url, "Finance_Customers", sanitized, finState.customers, setFin, "customers");
+        safeReconcile(url, "Finance_Customers", sanitized, finState.customers, setFin, "customers", customerRow);
       }
 
       if (sheet === "Finance_Payments") {
@@ -242,7 +289,60 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
           cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
           bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
         }));
-        safeReconcile(url, "Finance_Payments", sanitized, finState.payments, setFin, "payments");
+        safeReconcile(url, "Finance_Payments", sanitized, finState.payments, setFin, "payments", paymentRow);
+      }
+
+      if (sheet === "Finance_Loans") {
+        const sanitized = rows.map((r: any) => ({
+          ...r,
+          id: String(r.id ?? ""),
+          customer: String(r.customer ?? ""),
+          product: String(r.product ?? ""),
+          amount: String(r.amount ?? "0"),
+          deposit: String(r.deposit ?? "0"),
+          emi: String(r.emi ?? "0"),
+          duration: String(r.duration ?? ""),
+          interest: String(r.interest ?? ""),
+          date: String(r.date ?? ""),
+          collectedAmount: Number(r.collectedAmount) || 0,
+          paidEmis: Number(r.paidEmis) || 0,
+        }));
+        safeReconcile(url, "Finance_Loans", sanitized, useStore.getState().loans, setFin, "loans", loanRow);
+        useStore.setState((st) => ({ loans: recalculateLoanStatuses(st.loans) }));
+      }
+
+      if (sheet === "Finance_ProfitTransactions") {
+        const sanitized = rows.map((r: any) => ({
+          ...r,
+          amount: Number(r.amount) || 0,
+          cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
+          bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
+          takenBalanceAfter: Number(r.takenBalanceAfter) || 0,
+        }));
+        safeReconcile(
+          url, "Finance_ProfitTransactions", sanitized,
+          useStore.getState().profitTransactions || [], setFin, "profitTransactions",
+          profitTransactionRow
+        );
+      }
+
+      if (sheet === "Finance_Documents") {
+        // The register syncs; the file bytes do not (see documentRow). Keep
+        // whatever local fileUrl this device holds for a row the sheet also
+        // knows about, or reconciling would blank the only copy of the file.
+        const localDocs = new Map(useStore.getState().documents.map((d) => [String(d.id), d]));
+        const sanitized = rows.map((r: any) => ({
+          ...r,
+          id: String(r.id ?? ""),
+          customerId: String(r.customerId ?? ""),
+          customerName: String(r.customerName ?? ""),
+          fileName: String(r.fileName ?? ""),
+          fileSize: String(r.fileSize ?? ""),
+          date: String(r.date ?? ""),
+          driveUrl: String(r.driveUrl ?? "") || undefined,
+          fileUrl: localDocs.get(String(r.id))?.fileUrl,
+        }));
+        safeReconcile(url, "Finance_Documents", sanitized, useStore.getState().documents, setFin, "documents", documentRow);
       }
 
       if (sheet === "Finance_Expenses") {
@@ -307,14 +407,12 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
     try {
       const rawRows = await readSheet(url, sheet as SheetName);
 
+      const localSalesById = new Map(useMobileStore.getState().sales.map((x: any) => [String(x?.id), x]));
+      const localPurchasesById = new Map(useMobileStore.getState().purchases.map((x: any) => [String(x?.id), x]));
+
       const rows = rawRows.map((r: any) => {
         if (sheet === "Mobiles_Sales") {
-          let parsedItems = [];
-          if (Array.isArray(r.items)) {
-            parsedItems = r.items;
-          } else if (typeof r.items === "string" && r.items.trim()) {
-            try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
-          }
+          const parsedItems = itemsFromSheet(r.items, localSalesById.get(String(r.id))?.items);
           return {
             ...r,
             subtotal: Number(r.subtotal) || Number(r.totalAmount) || 0,
@@ -328,12 +426,7 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
           };
         }
         if (sheet === "Mobiles_Purchases") {
-          let parsedItems = [];
-          if (Array.isArray(r.items)) {
-            parsedItems = r.items;
-          } else if (typeof r.items === "string" && r.items.trim()) {
-            try { parsedItems = JSON.parse(r.items); } catch { parsedItems = []; }
-          }
+          const parsedItems = itemsFromSheet(r.items, localPurchasesById.get(String(r.id))?.items);
           return {
             ...r,
             quantity: Number(r.quantity) || 0,
@@ -351,6 +444,47 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
             bankAmount: toOptionalNumber(r.bankAmount),
           };
         }
+        if (sheet === "Mobiles_Products") {
+          return {
+            ...r,
+            // A 10-digit model or a numeric spec comes back from Sheets as a
+            // number; every product search does .toLowerCase() on these.
+            name: String(r.name ?? ""),
+            brand: String(r.brand ?? ""),
+            model: String(r.model ?? ""),
+            color: String(r.color ?? ""),
+            ramRom: String(r.ramRom ?? ""),
+            category: String(r.category ?? ""),
+            purchasePrice: Number(r.purchasePrice) || 0,
+            sellingPrice: Number(r.sellingPrice) || 0,
+          };
+        }
+        if (sheet === "Mobiles_Customers") {
+          return {
+            ...r,
+            name: String(r.name ?? ""),
+            mobile: String(r.mobile ?? ""),
+            isBlacklisted: r.isBlacklisted === true || r.isBlacklisted === "true",
+          };
+        }
+        if (sheet === "Mobiles_Suppliers") {
+          return {
+            ...r,
+            name: String(r.name ?? ""),
+            contact: String(r.contact ?? ""),
+            gstNo: String(r.gstNo ?? ""),
+            outstanding: Number(r.outstanding) || 0,
+          };
+        }
+        if (sheet === "Mobiles_Accessories") {
+          return {
+            ...r,
+            stock: Number(r.stock) || 0,
+            minLimit: Number(r.minLimit) || 0,
+            purchasePrice: Number(r.purchasePrice) || 0,
+            sellingPrice: Number(r.sellingPrice) || 0,
+          };
+        }
         if (sheet === "Mobiles_SupplierPayments") {
           return {
             ...r,
@@ -365,15 +499,61 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
       const mobState = useMobileStore.getState();
       const setMob = (fn: (s: any) => any) => useMobileStore.setState(fn);
 
-      if (sheet === "Mobiles_Sales")            safeReconcile(url, "Mobiles_Sales",            rows, mobState.sales,            setMob, "sales");
-      if (sheet === "Mobiles_Purchases")        safeReconcile(url, "Mobiles_Purchases",        rows, mobState.purchases,        setMob, "purchases");
-      if (sheet === "Mobiles_Products")         safeReconcile(url, "Mobiles_Products",         rows, mobState.products,         setMob, "products");
-      if (sheet === "Mobiles_Suppliers")        safeReconcile(url, "Mobiles_Suppliers",        rows, mobState.suppliers,        setMob, "suppliers");
-      if (sheet === "Mobiles_Customers")        safeReconcile(url, "Mobiles_Customers",        rows, mobState.customers,        setMob, "customers");
-      if (sheet === "Mobiles_Expenses")         safeReconcile(url, "Mobiles_Expenses",         rows, mobState.expenses,         setMob, "expenses");
-      if (sheet === "Mobiles_Accessories")      safeReconcile(url, "Mobiles_Accessories",      rows, mobState.accessories,      setMob, "accessories");
-      if (sheet === "Mobiles_SupplierPayments") safeReconcile(url, "Mobiles_SupplierPayments", rows, mobState.supplierPayments || [], setMob, "supplierPayments");
-      if (sheet === "Mobiles_WarrantyClaims")   safeReconcile(url, "Mobiles_WarrantyClaims",   rows, mobState.warranties || [], setMob, "warranties");
+      // Push the recovered line items back to the sheet, so a row damaged by
+      // the old raw-record upload is repaired for every other device instead
+      // of only this one. Only rows this device can actually recover are
+      // touched, so this is a handful of writes at most and then never again.
+      if (sheet === "Mobiles_Sales" || sheet === "Mobiles_Purchases") {
+        const localById = sheet === "Mobiles_Sales" ? localSalesById : localPurchasesById;
+        const toRow: (r: any) => SheetRow = sheet === "Mobiles_Sales" ? saleRow : purchaseRow;
+        for (const raw of rawRows) {
+          const id = String(raw?.id ?? "");
+          const local = localById.get(id);
+          if (!id || !local) continue;
+          if (safeItems(raw?.items).length === 0 && safeItems(local?.items).length > 0) {
+            void upsertRow(url, sheet as SheetName, toRow(local)).catch(() => { /* best effort */ });
+          }
+        }
+      }
+
+      if (sheet === "Mobiles_Sales")            safeReconcile(url, "Mobiles_Sales",            rows, mobState.sales,            setMob, "sales", saleRow);
+      if (sheet === "Mobiles_Purchases")        safeReconcile(url, "Mobiles_Purchases",        rows, mobState.purchases,        setMob, "purchases", purchaseRow);
+      if (sheet === "Mobiles_Products")         safeReconcile(url, "Mobiles_Products",         rows, mobState.products,         setMob, "products", productRow);
+      if (sheet === "Mobiles_Suppliers")        safeReconcile(url, "Mobiles_Suppliers",        rows, mobState.suppliers,        setMob, "suppliers", supplierRow);
+      if (sheet === "Mobiles_Customers")        safeReconcile(url, "Mobiles_Customers",        rows, mobState.customers,        setMob, "customers", mobileCustomerRow);
+      if (sheet === "Mobiles_Expenses")         safeReconcile(url, "Mobiles_Expenses",         rows, mobState.expenses,         setMob, "expenses", mobileExpenseRow);
+      if (sheet === "Mobiles_Accessories")      safeReconcile(url, "Mobiles_Accessories",      rows, mobState.accessories,      setMob, "accessories", accessoryRow);
+      if (sheet === "Mobiles_SupplierPayments") safeReconcile(url, "Mobiles_SupplierPayments", rows, mobState.supplierPayments || [], setMob, "supplierPayments", supplierPaymentRow);
+      if (sheet === "Mobiles_WarrantyClaims")   safeReconcile(url, "Mobiles_WarrantyClaims",   rows, mobState.warranties || [], setMob, "warranties", warrantyRow);
+
+      // Shop profile is a single fixed-id row, not a list, so it does not go
+      // through safeReconcile — last write from any device wins.
+      if (sheet === "Mobiles_Settings") {
+        const row: any = rows.find((r: any) => String(r?.id) === MOBILE_SETTINGS_ROW_ID);
+        if (row) {
+          useMobileStore.setState((st) => ({
+            settings: {
+              ...st.settings,
+              storeName: String(row.storeName ?? st.settings.storeName),
+              gstNo: String(row.gstNo ?? st.settings.gstNo),
+              contact: String(row.contact ?? st.settings.contact),
+              email: String(row.email ?? st.settings.email),
+              address: String(row.address ?? st.settings.address),
+              invoicePrefix: String(row.invoicePrefix ?? st.settings.invoicePrefix),
+            },
+          }));
+        } else if (!isSheetUnavailable("Mobiles_Settings")) {
+          // Nothing on the sheet yet — seed it from this device.
+          void upsertRow(url, "Mobiles_Settings", mobileSettingsRow(useMobileStore.getState().settings))
+            .catch(() => { /* best effort */ });
+        }
+      }
+
+      // Any of the three stock-bearing sheets landing means the derived
+      // quantities are stale — rebuild them from the reconciled ledgers.
+      if (sheet === "Mobiles_Products" || sheet === "Mobiles_Purchases" || sheet === "Mobiles_Sales") {
+        useMobileStore.getState().recomputeInventory();
+      }
 
     } catch (err) {
       deferred.push(sheet);

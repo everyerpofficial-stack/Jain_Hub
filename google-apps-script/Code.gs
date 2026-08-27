@@ -62,6 +62,12 @@ var ALLOWED_SHEETS = [
   "Finance_Payments",
   "Finance_Expenses",
   "Finance_Investments",
+  // Loans and profit withdraw/deposit rows used to be missing from this
+  // whitelist, so every write to them came back "Sheet not allowed" and the
+  // app silently kept them on one device only — clear the browser storage
+  // (or open the app anywhere else) and the whole loan book was gone.
+  "Finance_Loans",
+  "Finance_ProfitTransactions",
   "Finance_Staff",
   // Mobiles Module
   "Mobiles_Sales",
@@ -73,6 +79,12 @@ var ALLOWED_SHEETS = [
   "Mobiles_Products",
   "Mobiles_Accessories",
   "Mobiles_WarrantyClaims",
+  // Shop profile (name/GST/address/invoice prefix) — this prints on every
+  // invoice but used to live only in the browser that typed it.
+  "Mobiles_Settings",
+  // KYC/invoice document register. See the note on Finance_Documents in the
+  // app: the row is the file's metadata, not the file's bytes.
+  "Finance_Documents",
 ];
 
 // ── Main GET Handler ──────────────────────────────────────────────────────────
@@ -109,7 +121,7 @@ function doGet(e) {
     // ── 0b. Guard: shared API key (if configured via Script Properties) ─
     // Gates every data-bearing action. "ping" stays open so the Settings
     // page can sanity-check connectivity before a key is even set up.
-    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest") {
+    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest" || action === "driveUpload") {
       var configuredKey = PropertiesService.getScriptProperties().getProperty("API_KEY") || "";
       if (configuredKey && reqKey !== configuredKey) {
         return jsonResponse({ status: "error", error: "Unauthorized: invalid or missing API key" });
@@ -288,8 +300,7 @@ function doGet(e) {
       var headers2   = Object.keys(rows[0]);
       var dataValues = rows.map(function(row) {
         return headers2.map(function(h) {
-          var v = row[h];
-          return (v === null || v === undefined) ? "" : v;
+          return cellValue(row[h]);
         });
       });
 
@@ -365,8 +376,7 @@ function doGet(e) {
       }
 
       var rowValues = headersU.map(function(h) {
-        var v = upsertRow[h];
-        return (v === null || v === undefined) ? "" : v;
+        return cellValue(upsertRow[h]);
       });
 
       // Find existing row with this id (column 1, since every sheet's first
@@ -386,6 +396,75 @@ function doGet(e) {
         var insertAt = Math.max(sheetU.getLastRow() + 1, 2);
         sheetU.getRange(insertAt, 1, 1, headersU.length).setValues([rowValues]);
         return jsonResponse({ status: "ok", action: "inserted", row: insertAt });
+      }
+    }
+
+    // ── 4b. Upload a document file to Drive, in chunks ────────────────
+    // WHY: a spreadsheet cell holds 50,000 characters. A KYC scan or customer
+    // photo, base64-encoded, is far past that — so document FILES could never
+    // live in the sheet, only the record of them. They are written to a Drive
+    // folder instead and the sheet keeps the link.
+    //
+    // WHY CHUNKED: the payload rides in the query string (see "WHY ALL GET?"
+    // above), so one request cannot carry a whole file. The client sends
+    // ordered slices under one uploadId and marks the final one with last=1.
+    //
+    // NOTE: this is the only action that touches Drive. If you redeploy and
+    // skip the Drive authorisation prompt, these calls fail and the app
+    // simply keeps the file on the device that captured it.
+    if (action === "driveUpload") {
+      var uploadId = (e.parameter.uploadId || "").toString();
+      var seq      = parseInt(e.parameter.seq || "-1", 10);
+      var isLast   = (e.parameter.last || "") === "1";
+      if (!uploadId || !/^[A-Za-z0-9_-]{6,64}$/.test(uploadId)) {
+        return jsonResponse({ status: "error", error: "Invalid uploadId" });
+      }
+      if (isNaN(seq) || seq < 0) {
+        return jsonResponse({ status: "error", error: "Invalid seq" });
+      }
+
+      var cache = CacheService.getScriptCache();
+      // 6 hours is the cache maximum; an upload takes seconds, so this only
+      // matters if the client dies partway and abandons its slices.
+      cache.put("up_" + uploadId + "_" + seq, payload, 21600);
+
+      if (!isLast) {
+        return jsonResponse({ status: "ok", received: seq });
+      }
+
+      // Final slice — reassemble in order and verify nothing was evicted.
+      var parts = [];
+      for (var ci = 0; ci <= seq; ci++) {
+        var part = cache.get("up_" + uploadId + "_" + ci);
+        if (part === null) {
+          return jsonResponse({ status: "error", error: "Upload incomplete: missing chunk " + ci });
+        }
+        parts.push(part);
+      }
+      for (var cd = 0; cd <= seq; cd++) cache.remove("up_" + uploadId + "_" + cd);
+
+      var fileName = (e.parameter.name || ("document-" + uploadId)).toString();
+      var mimeType = (e.parameter.mimeType || "application/octet-stream").toString();
+      try {
+        var bytes = Utilities.base64Decode(parts.join(""));
+        var blob  = Utilities.newBlob(bytes, mimeType, fileName);
+        var folder = getOrCreateDocumentsFolder_();
+        var file = folder.createFile(blob);
+        // Link-only sharing: the app embeds the URL, and viewers are not
+        // necessarily signed into the owning Google account.
+        try {
+          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {
+          // Domain policy may forbid link sharing — the file still exists.
+        }
+        return jsonResponse({
+          status: "ok",
+          fileId: file.getId(),
+          url: "https://drive.google.com/uc?export=view&id=" + file.getId(),
+          name: fileName,
+        });
+      } catch (upErr) {
+        return jsonResponse({ status: "error", error: "Drive upload failed: " + upErr.toString() });
       }
     }
 
@@ -422,6 +501,29 @@ function doGet(e) {
       try { lock.releaseLock(); } catch (releaseErr) { /* already released/expired — ignore */ }
     }
   }
+}
+
+// ── Helper: the Drive folder uploaded documents land in ──────────────────────
+// Kept beside the spreadsheet's own folder so the whole ERP dataset — sheet
+// plus files — sits in one place in the owner's Drive.
+var DOCUMENTS_FOLDER_NAME = "Jain ERP Documents";
+function getOrCreateDocumentsFolder_() {
+  var existing = DriveApp.getFoldersByName(DOCUMENTS_FOLDER_NAME);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(DOCUMENTS_FOLDER_NAME);
+}
+
+// ── Helper: coerce a value into something a cell can actually hold ───────────
+// setValues() only takes primitives. An array/object value (a sale's or
+// purchase's items[] arrived that way when the client uploaded a raw record)
+// got coerced to "[object Object]", permanently destroying the line items on
+// that row. Serialise structured values as JSON so they survive the round trip.
+function cellValue(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") {
+    try { return JSON.stringify(v); } catch (e) { return String(v); }
+  }
+  return v;
 }
 
 // ── Helper: is sheet name in the whitelist? ───────────────────────────────────

@@ -131,7 +131,7 @@ function ProfitLossPage() {
       // 1. File charges of customers registered in this month
       const fileCharges = customers
         .filter((c) => {
-          const dateLower = c.billDate.toLowerCase();
+          const dateLower = String(c.billDate ?? "").toLowerCase();
           const pDate = parseAppDate(c.billDate);
           return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
         })
@@ -140,7 +140,7 @@ function ProfitLossPage() {
       // 2. Realised interest from successful payments in this month
       const interestRealised = payments
         .filter((p) => {
-          const dateLower = p.date.toLowerCase();
+          const dateLower = String(p.date ?? "").toLowerCase();
           const pDate = parseAppDate(p.date);
           return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && p.status === "Success" && isDateInRange(pDate, startDate, endDate);
         })
@@ -154,7 +154,7 @@ function ProfitLossPage() {
       // 3. Expenses recorded in this month
       const expense = expenses
         .filter((e) => {
-          const dateLower = e.date.toLowerCase();
+          const dateLower = String(e.date ?? "").toLowerCase();
           const pDate = parseAppDate(e.date);
           return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
         })

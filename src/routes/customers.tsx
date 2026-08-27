@@ -464,9 +464,11 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                   srcDoc={getSrcDoc(previewDoc.fileUrl)}
                   className="w-full h-[60vh] border-0 bg-white"
                 />
-              ) : previewDoc.fileUrl && previewDoc.fileUrl.startsWith("data:image/") ? (
+              ) : (previewDoc.fileUrl?.startsWith("data:image/") || previewDoc.driveUrl) ? (
+                // Falls back to the Drive copy so a scan uploaded on the shop's
+                // other device still opens here.
                 <img
-                  src={previewDoc.fileUrl}
+                  src={previewDoc.fileUrl || previewDoc.driveUrl}
                   alt={previewDoc.type}
                   className="max-h-[60vh] object-contain max-w-full rounded"
                 />
@@ -476,6 +478,12 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                   <div>
                     <p className="font-semibold text-foreground">{previewDoc.fileName}</p>
                     <p className="text-xs text-muted-foreground mt-1">{previewDoc.type} vault record</p>
+                    {!previewDoc.fileUrl && !previewDoc.driveUrl && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 max-w-xs">
+                        Uploaded on another device before files were stored in Drive — only its
+                        record syncs. Re-upload it to make it available everywhere.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -515,8 +523,10 @@ function CustomersPage() {
     if (!isDateInRange(cDate, startDate, endDate)) return false;
     if (q) {
       const n = q.toLowerCase();
+      // Mobile and Aadhaar come back from Google Sheets as NUMBERS, and
+      // .toLowerCase() on a number throws — searching used to blank the page.
       return [c.name, c.id, c.mobile, c.village, c.mobileBrand, c.mobileModel, c.aadhaar].some(
-        (v) => v?.toLowerCase().includes(n)
+        (v) => String(v ?? "").toLowerCase().includes(n)
       );
     }
     return true;

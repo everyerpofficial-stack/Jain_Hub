@@ -4,7 +4,7 @@ import { FileSpreadsheet, FileText, FileCode2, Download } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader } from "@/components/ui-kit";
-import { downloadExcel, downloadCustomerStatementExcel, useStore, parseAppDate, isDateInRange } from "@/lib/store";
+import { downloadExcel, downloadCustomerStatementExcel, useStore, parseAppDate, isDateInRange, buildCollections } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 import {
   Select,
@@ -27,7 +27,12 @@ export const Route = createFileRoute("/reports")({
 function ReportsPage() {
   const customers = useStore((s) => s.customers);
   const loans = useStore((s) => s.loans);
-  const collections = useStore((s) => s.collections);
+  // Derived from the (synced) customer book rather than read from the stored
+  // `collections` slice — that slice has no sheet, so this report was empty on
+  // any device that didn't personally register the customers. See buildCollections.
+  const storeCustomers = useStore((s) => s.customers);
+  const storePayments = useStore((s) => s.payments);
+  const collections = buildCollections(storeCustomers, storePayments);
   const expenses = useStore((s) => s.expenses);
   const investments = useStore((s) => s.investments);
   const payments = useStore((s) => s.payments);

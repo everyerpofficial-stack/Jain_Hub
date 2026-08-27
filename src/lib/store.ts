@@ -2,10 +2,11 @@
 // Persists to localStorage. All pages read from and write to this store.
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { safeLocalStorage } from "./safeStorage";
 import XLSX from "xlsx-js-style";
 import { toast } from "sonner";
-import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
+import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp, uploadFileToDrive, parseDataUrl } from "./googleSheets";
 import { enqueueWrite, markIdDeleted } from "./syncQueue";
 import { nextSeqId } from "./utils";
 
@@ -250,7 +251,14 @@ export type AppDocument = {
   fileSize: string;
   date: string;
   status: "Verified" | "Signed" | "Pending";
+  /** The file itself, as a base64 data URL. Local to the device that captured it. */
   fileUrl?: string;
+  /**
+   * Link to the same file in the Apps Script's Drive folder. This is the part
+   * that travels: a sheet cell cannot hold a scan, so the register carries the
+   * link and any device can open the document from it.
+   */
+  driveUrl?: string;
 };
 
 export type Staff = {
@@ -342,7 +350,12 @@ export function calculateEmi(principal: number, monthlyRatePct: number, months: 
 }
 
 // ---- EMI Date Advancement Helpers ----
-export function advanceEmiDate(dateStr: string): string {
+export function advanceEmiDate(input: string): string {
+  // A date cell that Sheets stored as a number/Date arrives here as a
+  // non-string. `.match()` on it threw inside recalculateStatuses(), which
+  // runs on every customer registration and payment — the throw escaped the
+  // click handler, so the record was never saved and the dialog never closed.
+  const dateStr = typeof input === "string" ? input : String(input ?? "");
   if (!dateStr) return "";
   // Check if it's YYYY-MM-DD
   const ymdMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -539,6 +552,8 @@ type State = {
   deleteInvestment: (id: string) => void;
   deleteProfitTransaction: (id: string) => void;
   deleteDocument: (id: string) => void;
+  /** Push any locally-held document files to Drive and record their links. */
+  uploadPendingDocuments: () => Promise<void>;
   withdrawProfit: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank" | "Cash & UPI"; notes?: string; cashAmount?: number; bankAmount?: number }) => ProfitTransaction;
   depositTakenMoney: (input: { amount: number; date?: string; method?: "Cash" | "UPI" | "Bank" | "Cash & Bank" | "Cash & UPI"; notes?: string; cashAmount?: number; bankAmount?: number }) => ProfitTransaction;
   addCustomer: (input: {
@@ -591,7 +606,7 @@ type State = {
 // used both by the full-table syncToSheets() below and by the per-record
 // upsert/delete calls each mutator makes. Keeping one function per entity
 // means the two paths can never drift out of sync with each other.
-function customerRow(c: Customer): SheetRow {
+export function customerRow(c: Customer): SheetRow {
   return {
     id: c.id, billDate: c.billDate || "",
     firstName: c.firstName || "", fatherName: c.fatherName || "", surname: c.surname || "",
@@ -613,7 +628,44 @@ function customerRow(c: Customer): SheetRow {
     loan: c.loan || "", emi: c.emi || "", due: c.due || "",
   };
 }
-function paymentRow(p: Payment): SheetRow {
+export function loanRow(l: Loan): SheetRow {
+  return {
+    id: l.id, customer: l.customer, product: l.product || "",
+    amount: l.amount, deposit: l.deposit, emi: l.emi,
+    duration: l.duration, interest: l.interest, status: l.status,
+    date: l.date || "",
+    collectedAmount: l.collectedAmount ?? 0,
+    paidEmis: l.paidEmis ?? 0,
+  };
+}
+export function profitTransactionRow(t: ProfitTransaction): SheetRow {
+  return {
+    id: t.id, type: t.type, amount: t.amount,
+    formattedAmount: t.formattedAmount, date: t.date, method: t.method,
+    cashAmount: t.cashAmount ?? "", bankAmount: t.bankAmount ?? "",
+    notes: t.notes || "", withdrawnBy: t.withdrawnBy || "",
+    takenBalanceAfter: t.takenBalanceAfter,
+  };
+}
+/**
+ * The document register — which customer has which KYC file on record, when it
+ * was taken, whether it is verified, and where the file lives.
+ *
+ * `fileUrl` is deliberately NOT here: it holds the file as a base64 data URL,
+ * and a spreadsheet cell caps out at 50,000 characters, so even a compressed
+ * photo would be truncated into a corrupt image while bloating every digest
+ * poll. `driveUrl` is what travels — the file goes to the Apps Script's Drive
+ * folder and the sheet carries the link to it.
+ */
+export function documentRow(d: AppDocument): SheetRow {
+  return {
+    id: d.id, customerId: d.customerId || "", customerName: d.customerName || "",
+    type: d.type, fileName: d.fileName || "", fileSize: d.fileSize || "",
+    date: d.date || "", status: d.status || "Pending",
+    driveUrl: d.driveUrl || "",
+  };
+}
+export function paymentRow(p: Payment): SheetRow {
   return {
     id: p.id, customer: p.customer, customerId: p.customerId || "",
     amount: p.amount, method: p.method,
@@ -871,6 +923,7 @@ export const useStore = create<State>()(
       deleteCustomer: (id) => {
         const found = get().customers.find((c) => c.id === id);
         const orphanedPaymentIds = get().payments.filter((p) => p.customerId === id).map((p) => p.id);
+        const orphanedDocIds = get().documents.filter((d) => d.customerId === id).map((d) => d.id);
         set((s) => ({
           customers: s.customers.filter((c) => c.id !== id),
           collections: s.collections.filter((col) => col.customerId !== id),
@@ -893,6 +946,11 @@ export const useStore = create<State>()(
         orphanedPaymentIds.forEach((pid) => {
           syncDelete(get, "Finance_Payments", pid, "cascaded payment delete");
         });
+        // The local cascade already dropped this customer's documents; without
+        // this the register kept resurrecting them on the next poll.
+        orphanedDocIds.forEach((did) => {
+          syncDelete(get, "Finance_Documents", did, "cascaded document delete");
+        });
       },
 
       deleteLoan: (id) => {
@@ -909,6 +967,7 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        syncDelete(get, "Finance_Loans", id, "loan delete");
       },
 
       deletePayment: (id) => {
@@ -1036,10 +1095,49 @@ export const useStore = create<State>()(
             ...s.audit,
           ],
         }));
+        syncDelete(get, "Finance_ProfitTransactions", id, "profit transaction delete");
+      },
+
+      uploadPendingDocuments: async () => {
+        const { sheetsConfig } = get();
+        if (!sheetsConfig.enabled || !sheetsConfig.url) return;
+        const url = sheetsConfig.url;
+
+        // Only documents this device actually holds bytes for and that have no
+        // Drive link yet. Invoices are generated HTML and are reproducible, so
+        // they stay out of Drive; scans and photos are not reproducible.
+        const pending = get().documents.filter(
+          (d) => d && d.fileUrl && !d.driveUrl && d.type !== "Invoice"
+        );
+        if (pending.length === 0) return;
+
+        for (const doc of pending) {
+          const parsed = parseDataUrl(doc.fileUrl!);
+          if (!parsed) continue;
+          try {
+            const { url: driveUrl } = await uploadFileToDrive(url, {
+              name: `${doc.customerId}-${doc.type}-${doc.fileName}`.replace(/[^\w.-]+/g, "_"),
+              mimeType: parsed.mimeType,
+              base64: parsed.base64,
+            });
+            set((st) => ({
+              documents: st.documents.map((d) => (d.id === doc.id ? { ...d, driveUrl } : d)),
+            }));
+            const updated = get().documents.find((d) => d.id === doc.id);
+            if (updated) syncUpsert(get, "Finance_Documents", documentRow(updated), "document link");
+          } catch (err) {
+            // Non-fatal by design: the local copy still works and the register
+            // still syncs, exactly as before Drive storage existed. Most likely
+            // cause is a redeploy where the Drive authorisation was declined.
+            console.warn(`[store] Drive upload failed for ${doc.fileName}:`, err);
+            return; // one failure means the rest will fail too — stop retrying now
+          }
+        }
       },
 
       deleteDocument: (id) => {
         const found = get().documents.find((d) => d.id === id);
+        syncDelete(get, "Finance_Documents", id, "document delete");
         set((s) => ({
           documents: s.documents.filter((d) => d.id !== id),
           audit: [
@@ -1282,6 +1380,12 @@ export const useStore = create<State>()(
         // clobber another device's concurrently-added/edited customer the
         // way a full-table rewrite would (see upsertRow's doc comment).
         syncUpsert(get, "Finance_Customers", customerRow(customer), "customer add");
+        // The KYC/invoice register travels with the customer; the file bytes
+        // themselves cannot (see documentRow).
+        newDocs.forEach((d) => syncUpsert(get, "Finance_Documents", documentRow(d), "document register"));
+        // Fire-and-forget: registration must not block on a multi-request
+        // upload, and must still succeed if Drive is unavailable.
+        void get().uploadPendingDocuments();
         return customer;
       },
 
@@ -1443,6 +1547,10 @@ export const useStore = create<State>()(
           paidEmis: 0,
         };
         set((s) => ({ loans: [loan, ...s.loans] }));
+        // Loans had no sheet at all, so the entire loan book lived in one
+        // browser's local storage — clearing it, or opening the app on any
+        // other device, showed zero loans.
+        syncUpsert(get, "Finance_Loans", loanRow(loan), "loan add");
         return loan;
       },
 
@@ -1460,15 +1568,17 @@ export const useStore = create<State>()(
         const isFullyPaid = netLoanPrincipal > 0 && newCollected >= netLoanPrincipal;
 
         set((s) => ({
-          loans: s.loans.map((l) => {
-            if (l.id !== loanId) return l;
-            return {
-              ...l,
-              collectedAmount: newCollected,
-              paidEmis: newPaidEmis,
-              status: isFullyPaid ? "Completed" : l.status,
-            };
-          }),
+          loans: recalculateLoanStatuses(
+            s.loans.map((l) => {
+              if (l.id !== loanId) return l;
+              return {
+                ...l,
+                collectedAmount: newCollected,
+                paidEmis: newPaidEmis,
+                status: isFullyPaid ? "Completed" : l.status,
+              };
+            })
+          ),
         }));
 
         const txnId = nextSeqId("TXN-", get().payments.map((x) => x.id));
@@ -1491,6 +1601,8 @@ export const useStore = create<State>()(
         }));
 
         syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "loan collection payment");
+        const updatedLoan = get().loans.find((l) => l.id === loanId);
+        if (updatedLoan) syncUpsert(get, "Finance_Loans", loanRow(updatedLoan), "loan (from collection)");
       },
 
       collectEmi: ({ collectionId, method }) => {
@@ -1603,6 +1715,7 @@ export const useStore = create<State>()(
           ],
         }));
 
+        syncUpsert(get, "Finance_ProfitTransactions", profitTransactionRow(txn), "profit withdrawal");
         return txn;
       },
 
@@ -1652,6 +1765,7 @@ export const useStore = create<State>()(
           ],
         }));
 
+        syncUpsert(get, "Finance_ProfitTransactions", profitTransactionRow(txn), "profit redeposit");
         return txn;
       },
 
@@ -1708,6 +1822,8 @@ export const useStore = create<State>()(
               writeSheet(sheetsConfig.url, "Finance_Expenses", []),
               writeSheet(sheetsConfig.url, "Finance_Investments", []),
               writeSheet(sheetsConfig.url, "Finance_ProfitTransactions", []),
+              writeSheet(sheetsConfig.url, "Finance_Loans", []),
+              writeSheet(sheetsConfig.url, "Finance_Documents", []),
             ]);
             const ts = nowTimestamp();
             set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
@@ -1718,13 +1834,14 @@ export const useStore = create<State>()(
       },
 
       recheckStatuses: () => set((s) => ({
-        customers: recalculateStatuses(s.customers)
+        customers: recalculateStatuses(s.customers),
+        loans: recalculateLoanStatuses(s.loans),
       })),
 
       updateSheetsConfig: (cfg) => set((s) => ({ sheetsConfig: { ...s.sheetsConfig, ...cfg } })),
 
       syncToSheets: async () => {
-        const { sheetsConfig, customers, payments, expenses, investments, staff } = get();
+        const { sheetsConfig, customers, payments, expenses, investments, staff, loans, profitTransactions, documents } = get();
         if (!sheetsConfig.enabled || !sheetsConfig.url) {
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
@@ -1733,6 +1850,9 @@ export const useStore = create<State>()(
           await writeSheet(sheetsConfig.url, "Finance_Payments", payments.map(paymentRow));
           await writeSheet(sheetsConfig.url, "Finance_Expenses", expenses.map(expenseRow));
           await writeSheet(sheetsConfig.url, "Finance_Investments", investments.map(investmentRow));
+          await writeSheet(sheetsConfig.url, "Finance_Loans", (loans || []).map(loanRow));
+          await writeSheet(sheetsConfig.url, "Finance_ProfitTransactions", (profitTransactions || []).map(profitTransactionRow));
+          await writeSheet(sheetsConfig.url, "Finance_Documents", (documents || []).map(documentRow));
           await writeSheet(sheetsConfig.url, "Finance_Staff", staff.map(staffRow));
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
@@ -1748,16 +1868,28 @@ export const useStore = create<State>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          const [custRows, payRows, expRows, invRows, staffRows] = await Promise.all([
+          const [custRows, payRows, expRows, invRows, staffRows, loanRows, profitRows, docRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Finance_Customers"),
             readSheet(sheetsConfig.url, "Finance_Payments"),
             readSheet(sheetsConfig.url, "Finance_Expenses"),
             readSheet(sheetsConfig.url, "Finance_Investments"),
             readSheet(sheetsConfig.url, "Finance_Staff"),
+            readSheet(sheetsConfig.url, "Finance_Loans"),
+            readSheet(sheetsConfig.url, "Finance_ProfitTransactions"),
+            readSheet(sheetsConfig.url, "Finance_Documents"),
           ]);
           // Customers: parse all numeric fields (always update state, even if empty array)
           const sanitizedCust = custRows.map((r: any) => ({
             ...r,
+            // Sheets returns a 10-digit mobile / 12-digit Aadhaar as a NUMBER;
+            // the customer and due-list searches call .toLowerCase() on them.
+            name: String(r.name ?? ""),
+            mobile: String(r.mobile ?? ""),
+            aadhaar: String(r.aadhaar ?? ""),
+            guarantyMobile: String(r.guarantyMobile ?? ""),
+            village: String(r.village ?? ""),
+            emiDate: String(r.emiDate ?? ""),
+            billDate: String(r.billDate ?? ""),
             price: Number(r.price) || 0,
             fileCharge: Number(r.fileCharge) || 0,
             deposit: Number(r.deposit) || 0,
@@ -1789,6 +1921,56 @@ export const useStore = create<State>()(
           set({ expenses: expRows as unknown as Expense[] });
           set({ investments: invRows as unknown as Investment[] });
 
+          const sanitizedLoans = loanRows.map((r: any) => ({
+            ...r,
+            id: String(r.id ?? ""),
+            customer: String(r.customer ?? ""),
+            product: String(r.product ?? ""),
+            amount: String(r.amount ?? "0"),
+            deposit: String(r.deposit ?? "0"),
+            emi: String(r.emi ?? "0"),
+            duration: String(r.duration ?? ""),
+            interest: String(r.interest ?? ""),
+            date: String(r.date ?? ""),
+            collectedAmount: Number(r.collectedAmount) || 0,
+            paidEmis: Number(r.paidEmis) || 0,
+          }));
+          if (loanRows.length > 0 || get().loans.length === 0) {
+            set({ loans: recalculateLoanStatuses(sanitizedLoans as unknown as Loan[]) });
+          }
+
+          const sanitizedProfit = profitRows.map((r: any) => ({
+            ...r,
+            amount: Number(r.amount) || 0,
+            cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
+            bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
+            takenBalanceAfter: Number(r.takenBalanceAfter) || 0,
+          }));
+          if (profitRows.length > 0 || (get().profitTransactions || []).length === 0) {
+            set({ profitTransactions: sanitizedProfit as unknown as ProfitTransaction[] });
+          }
+
+          // Merge the register with what this device holds: the sheet knows
+          // which documents exist everywhere, but only the capturing device
+          // has the file bytes, so never drop a local fileUrl.
+          const localDocs = new Map(get().documents.map((d) => [String(d.id), d]));
+          const mergedDocs = docRows.map((r: any) => ({
+            id: String(r.id ?? ""),
+            customerId: String(r.customerId ?? ""),
+            customerName: String(r.customerName ?? ""),
+            type: String(r.type ?? "Invoice"),
+            fileName: String(r.fileName ?? ""),
+            fileSize: String(r.fileSize ?? ""),
+            date: String(r.date ?? ""),
+            status: String(r.status ?? "Pending"),
+            driveUrl: String(r.driveUrl ?? "") || undefined,
+            // The bytes never come from the sheet — keep whatever this device holds.
+            fileUrl: localDocs.get(String(r.id))?.fileUrl,
+          }));
+          const sheetDocIds = new Set(mergedDocs.map((d) => d.id));
+          for (const [id, d] of localDocs) if (!sheetDocIds.has(id)) mergedDocs.push(d as any);
+          set({ documents: mergedDocs as unknown as AppDocument[] });
+
           if (staffRows.length > 0) {
             const mappedStaff = staffRows
               .filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()))
@@ -1817,6 +1999,8 @@ export const useStore = create<State>()(
     }),
     {
       name: "jain-finance-erp-v4",
+      // Never let a full/blocked localStorage throw out of set() — see safeStorage.
+      storage: createJSONStorage(() => safeLocalStorage),
       merge: (persistedState: any, currentState) => {
         const merged = { ...currentState, ...(persistedState || {}) };
         merged.customers = Array.isArray(merged.customers) ? merged.customers : seedCustomers;
@@ -2366,7 +2550,8 @@ export function isDateInRange(date: Date | null, start: Date | null, end: Date |
   return true;
 }
 
-export function retreatEmiDate(dateStr: string): string {
+export function retreatEmiDate(input: string): string {
+  const dateStr = typeof input === "string" ? input : String(input ?? "");
   if (!dateStr) return "";
   
   // Check if YYYY-MM-DD
@@ -2410,14 +2595,19 @@ export function getOriginalEmiStartDate(emiDateStr: string, paidEmis: number): s
 }
 
 export function getMissedEmisCount(emiDateStr: string, paidEmis: number, noOfEmi: number): number {
-  const originalStart = getOriginalEmiStartDate(emiDateStr, paidEmis);
+  const paid = Number(paidEmis) || 0;
+  const total = Number(noOfEmi) || 0;
+  const originalStart = getOriginalEmiStartDate(
+    typeof emiDateStr === "string" ? emiDateStr : String(emiDateStr ?? ""),
+    paid
+  );
   const today = new Date();
   const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   
   let emisExpected = 0;
   let currentDueDate = originalStart;
   
-  for (let i = 0; i < noOfEmi; i++) {
+  for (let i = 0; i < total; i++) {
     const parsedDue = parseAppDate(currentDueDate);
     if (parsedDue) {
       const dueZero = new Date(parsedDue.getFullYear(), parsedDue.getMonth(), parsedDue.getDate());
@@ -2430,7 +2620,83 @@ export function getMissedEmisCount(emiDateStr: string, paidEmis: number, noOfEmi
     currentDueDate = advanceEmiDate(currentDueDate);
   }
   
-  return Math.max(0, emisExpected - paidEmis);
+  return Math.max(0, emisExpected - paid);
+}
+
+/**
+ * Build the EMI collection roster from the customer book.
+ *
+ * `collections` is a stored slice that only ever got a row when THIS browser
+ * ran addCustomer(), and it has no sheet — so on a second device (or after
+ * local storage was cleared) the EMI Schedule report came out empty even
+ * though every customer was present and syncing. Every field on a Collection
+ * is already a function of the customer record, so derive it rather than
+ * adding a nineteenth sheet that could drift out of step with the customers.
+ */
+export function buildCollections(customers: Customer[], payments: Payment[]): Collection[] {
+  const lastMethodByCustomer = new Map<string, Collection["method"]>();
+  for (const p of payments || []) {
+    // payments is newest-first, so the first hit per customer is the latest.
+    if (p?.customerId && !lastMethodByCustomer.has(p.customerId)) {
+      const m = p.method;
+      if (m === "Cash" || m === "UPI" || m === "Bank" || m === "Cash & Bank") {
+        lastMethodByCustomer.set(p.customerId, m);
+      }
+    }
+  }
+
+  return (customers || []).filter(Boolean).map((c, idx) => {
+    const missed = Number(c.missedEmis) || 0;
+    const pending = Number(c.pendingEmis) || 0;
+    const state: Collection["state"] = pending === 0 ? "Collected" : missed > 0 ? "Missed" : "Pending";
+    return {
+      id: `C-${String(idx + 1).padStart(3, "0")}`,
+      name: c.name,
+      customerId: c.id,
+      village: c.village,
+      amount: c.emi,
+      state,
+      collector: "—",
+      method: lastMethodByCustomer.get(c.id) ?? "—",
+    };
+  });
+}
+
+/**
+ * Derive each loan's status the same way customers get theirs.
+ *
+ * Loan.status was only ever written as "Active" on creation and "Completed"
+ * once fully collected, so the Overdue and Defaulted summary cards on the
+ * Loans page could never show anything but 0 and their click-to-filter did
+ * nothing. Missed instalments are counted from the loan's start date.
+ */
+export function recalculateLoanStatuses(loans: Loan[]): Loan[] {
+  const today = new Date();
+  const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  return (loans || []).filter(Boolean).map((l) => {
+    const principal = Math.max(0, parseAmount(l.amount) - parseAmount(l.deposit));
+    const collected = Number(l.collectedAmount) || 0;
+    if (principal > 0 && collected >= principal) {
+      return { ...l, status: "Completed" as const };
+    }
+
+    const months = parseInt(String(l.duration ?? "").replace(/\D/g, ""), 10) || 0;
+    const start = parseAppDate(l.date);
+    if (!start || months <= 0) return { ...l, status: l.status === "Completed" ? "Active" : l.status };
+
+    // Instalments whose due date (start + n months) has already passed.
+    let due = 0;
+    for (let i = 1; i <= months; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth() + i, start.getDate());
+      if (new Date(d.getFullYear(), d.getMonth(), d.getDate()) <= todayZero) due++;
+      else break;
+    }
+
+    const missed = Math.max(0, due - (Number(l.paidEmis) || 0));
+    const status: Loan["status"] = missed === 0 ? "Active" : missed >= 3 ? "Defaulted" : "Overdue";
+    return { ...l, status };
+  });
 }
 
 export function recalculateStatuses(customers: Customer[]): Customer[] {

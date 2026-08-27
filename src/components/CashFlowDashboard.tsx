@@ -545,10 +545,11 @@ export function CashFlowDashboard() {
   // --- 6. Table Search & Filtering ---
   const filteredTableItems = useMemo(() => {
     return activeRawItems.filter((item) => {
+      const needle = searchQuery.toLowerCase();
       const matchesSearch =
-        item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.id.toLowerCase().includes(searchQuery.toLowerCase());
+        String(item.category ?? "").toLowerCase().includes(needle) ||
+        String(item.description ?? "").toLowerCase().includes(needle) ||
+        String(item.id ?? "").toLowerCase().includes(needle);
       
       const matchesMethod = methodFilter === "All" || item.method === methodFilter;
       const matchesType = typeFilter === "All" || item.type === typeFilter;

@@ -79,16 +79,36 @@ function DocumentsPage() {
     return Object.values(map);
   })();
 
+  // Reachable from this device if we hold the bytes locally OR the file made
+  // it to Drive. Only the remainder is genuinely stranded.
+  const offDeviceCount = filteredDocs.filter((d) => !d.fileUrl && !d.driveUrl).length;
+
   return (
     <AppShell breadcrumb="Documents">
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
           <h1 className="text-[26px] font-semibold tracking-tight">Document Vault</h1>
           <p className="text-sm text-muted-foreground mt-1 inline-flex items-center gap-1.5">
-            <ShieldCheck className="size-3.5 text-success" /> {filteredDocs.length} documents · Stored in your organization's database
+            <ShieldCheck className="size-3.5 text-success" /> {filteredDocs.length} documents · Register synced to Google Sheets
           </p>
         </div>
       </div>
+
+      {offDeviceCount > 0 && (
+        <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-500/45 bg-amber-500/5 px-4 py-3">
+          <FileText className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <span className="font-semibold text-amber-700 dark:text-amber-400">
+              {offDeviceCount} of these files are not available here.
+            </span>
+            <span className="text-muted-foreground ml-1.5">
+              They were uploaded before files were stored in Drive, so only the record of them
+              travels between devices. Open this page on the browser they were uploaded from to
+              view them, or re-upload them from the customer&apos;s profile.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <FilterBar
@@ -219,10 +239,12 @@ function DocumentsPage() {
                       >
                         <Eye className="size-3.5" /> Preview
                       </button>
-                      {d.fileUrl && (
+                      {(d.fileUrl || d.driveUrl) && (
                         <a
-                          href={d.fileUrl}
-                          download={d.fileName}
+                          href={d.fileUrl || d.driveUrl}
+                          {...(d.fileUrl
+                            ? { download: d.fileName }
+                            : { target: "_blank", rel: "noopener noreferrer" })}
                           className="flex-1 h-8 rounded-md border border-border text-foreground text-xs font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-accent text-center text-decoration-none"
                         >
                           <Download className="size-3.5" /> Download
@@ -295,9 +317,9 @@ function DocumentsPage() {
                     srcDoc={getSrcDoc(previewDoc.fileUrl)}
                     className="w-full h-[60vh] border-0 bg-white"
                   />
-                ) : previewDoc.fileUrl && previewDoc.fileUrl.startsWith("data:image/") ? (
+                ) : (previewDoc.fileUrl?.startsWith("data:image/") || previewDoc.driveUrl) ? (
                   <img
-                    src={previewDoc.fileUrl}
+                    src={previewDoc.fileUrl || previewDoc.driveUrl}
                     alt={previewDoc.type}
                     className="max-h-[60vh] object-contain max-w-full rounded"
                   />
@@ -307,6 +329,13 @@ function DocumentsPage() {
                     <div>
                       <p className="font-semibold text-foreground">{previewDoc.fileName}</p>
                       <p className="text-xs text-muted-foreground mt-1">{previewDoc.type} vault record</p>
+                      {!previewDoc.fileUrl && !previewDoc.driveUrl && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 max-w-xs">
+                          This file was uploaded on another device before files were stored in
+                          Drive. Only its record syncs — open the app on that device, or re-upload
+                          it from the customer&apos;s profile.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}

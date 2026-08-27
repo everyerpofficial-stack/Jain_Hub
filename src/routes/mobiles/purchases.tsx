@@ -1235,6 +1235,12 @@ function PurchasesPage() {
     return numB - numA;
   });
 
+  // Bills carrying units but no product breakdown — their stock is unaccounted
+  // for until they are re-recorded.
+  const billsMissingItems = (purchases || []).filter(
+    (p) => p && Number(p.quantity) > 0 && safeItems(p.items).length === 0
+  );
+
   const combinedSuppliersList: MobileSupplier[] = [...suppliers];
   (purchases || []).forEach((p) => {
     if (p.supplierName && !combinedSuppliersList.some((s) => String(s.name || "").trim().toLowerCase() === p.supplierName.trim().toLowerCase() || s.id === p.supplierId)) {
@@ -1352,6 +1358,19 @@ function PurchasesPage() {
           action={<span className="text-xs text-muted-foreground">Historical records list</span>}
         />
 
+        {billsMissingItems.length > 0 && (
+          <div className="mx-4 mb-3 rounded-lg border border-amber-500/45 bg-amber-500/5 px-4 py-3 text-xs">
+            <div className="font-bold text-amber-700 dark:text-amber-400">
+              {billsMissingItems.length} bill{billsMissingItems.length === 1 ? "" : "s"} have no product breakdown
+            </div>
+            <div className="mt-1 text-muted-foreground leading-relaxed">
+              Their units ({billsMissingItems.reduce((n, p) => n + (Number(p.quantity) || 0), 0)} in total) can&apos;t be
+              attributed to any product, so Inventory does not count them. Re-record{" "}
+              {billsMissingItems.map((p) => p.invoiceNo || p.id).join(", ")} to bring that stock back in.
+            </div>
+          </div>
+        )}
+
         <div className="w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
@@ -1383,6 +1402,11 @@ function PurchasesPage() {
                   const paidAmt = p.amountPaid !== undefined ? p.amountPaid : (pStat === "Paid" ? p.amount : 0);
                   const dueAmt = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.amount - paidAmt);
                   const modeText = p.paymentMode ? ` (${p.paymentMode})` : "";
+                  // A bill with a quantity but no line items cannot be
+                  // attributed to any product, so its units can never reach
+                  // stock. Say so on the row instead of leaving the shop to
+                  // wonder why Inventory disagrees with the purchase log.
+                  const itemsMissing = Number(p.quantity) > 0 && safeItems(p.items).length === 0;
 
                   return (
                     <tr key={p.id} className="border-b border-border hover:bg-accent/30 transition-colors last:border-0">
@@ -1392,7 +1416,17 @@ function PurchasesPage() {
                       </td>
                       <td className="py-3 px-3 font-semibold text-foreground">{p.supplierName}</td>
                       <td className="py-3 px-3 font-mono">{p.invoiceNo}</td>
-                      <td className="py-3 px-3 text-center font-bold text-sm">{p.quantity}</td>
+                      <td className="py-3 px-3 text-center font-bold text-sm">
+                        {p.quantity}
+                        {itemsMissing && (
+                          <div
+                            className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                            title="This bill has no product breakdown, so its units are not counted in Inventory. Re-record it to restore the stock."
+                          >
+                            No items
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-3 text-right font-bold text-foreground">{formatInr(p.amount)}</td>
                       <td className="py-3 px-3">
                         <div className="space-y-0.5 text-[11px]">

@@ -47,7 +47,7 @@ function PaymentsPage() {
     if (!isDateInRange(pDate, startDate, endDate)) return false;
     if (q) {
       const needle = q.toLowerCase();
-      return [p.id, p.customer, p.collector].some((v) => v.toLowerCase().includes(needle));
+      return [p.id, p.customer, p.collector].some((v) => String(v ?? "").toLowerCase().includes(needle));
     }
     return true;
   });
