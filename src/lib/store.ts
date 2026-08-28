@@ -2035,9 +2035,9 @@ export const useStore = create<State>()(
         merged.staff = Array.isArray(merged.staff) && merged.staff.length > 0
           ? merged.staff.filter((s: any) => (s.name && String(s.name).trim()) || (s.email && String(s.email).trim()))
           : seedStaff;
-        // Preserve user configured or disconnected sheetsConfig, fallback to PERMANENT_SHEETS_URL if undefined
+        // PERMANENT: Always force the hardcoded URL — no per-device config needed
         merged.sheetsConfig = {
-          url: merged.sheetsConfig?.url ?? PERMANENT_SHEETS_URL,
+          url: PERMANENT_SHEETS_URL,
           enabled: merged.sheetsConfig?.enabled ?? true,
           lastSync: merged.sheetsConfig?.lastSync,
         };

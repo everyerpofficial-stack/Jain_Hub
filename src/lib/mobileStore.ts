@@ -1518,9 +1518,9 @@ export const useMobileStore = create<MobilesState>()(
           ? merged.audit.filter((a: any) => !FAKE_MOBILE_AUDIT_TS.has(a?.ts))
           : seedMobileAudit;
         merged.settings = { ...defaultSettings, ...(merged.settings || {}) };
-        // Preserve user configured or disconnected sheetsConfig, fallback to PERMANENT_SHEETS_URL if undefined
+        // PERMANENT: Always force the hardcoded URL — no per-device config needed
         merged.sheetsConfig = {
-          url: merged.sheetsConfig?.url ?? PERMANENT_SHEETS_URL,
+          url: PERMANENT_SHEETS_URL,
           enabled: merged.sheetsConfig?.enabled ?? true,
           lastSync: merged.sheetsConfig?.lastSync,
         };

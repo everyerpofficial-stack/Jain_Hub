@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Globe, Database, Download, Upload, CheckCircle2, XCircle, Loader2, Trash2, Users, CreditCard, TrendingUp, Package, ShoppingCart, BarChart2, Truck, AlertTriangle, Landmark, Mail, Phone, MapPin, ClipboardList, Wifi } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -56,13 +56,7 @@ function SettingsPage() {
   const updateSheetsConfig = useMobileStore((s) => s.updateSheetsConfig);
   const syncToSheets       = useMobileStore((s) => s.syncToSheets);
   const loadFromSheets     = useMobileStore((s) => s.loadFromSheets);
-  const [urlInput,    setUrlInput]    = useState(sheetsConfig.url || "");
 
-  useEffect(() => {
-    if (sheetsConfig.url && !urlInput) {
-      setUrlInput(sheetsConfig.url);
-    }
-  }, [sheetsConfig.url]);
 
   const [syncing,     setSyncing]     = useState(false);
   const [loading,     setLoading]     = useState(false);
@@ -72,8 +66,8 @@ function SettingsPage() {
   const [testResult,  setTestResult]  = useState<"ok" | "error" | null>(null);
 
   const handleTestConnection = async () => {
-    const url = urlInput.trim() || sheetsConfig.url;
-    if (!url) { toast.error("Enter the Apps Script URL first"); return; }
+    const url = sheetsConfig.url;
+    if (!url) { toast.error("No database URL configured"); return; }
     setTesting(true);
     setTestResult(null);
     let result: { ok: boolean; error?: string };
@@ -96,29 +90,11 @@ function SettingsPage() {
     toast.success("Store profile saved");
   };
 
-  const handleSaveUrl = () => {
-    const trimmed = urlInput.trim();
-    if (!trimmed) {
-      toast.error("Please enter a valid Web App URL");
-      return;
-    }
-    updateSheetsConfig({ url: trimmed, enabled: true });
-    useStore.getState().updateSheetsConfig({ url: trimmed, enabled: true });
-    toast.success("Apps Script URL saved & connected for both Finance & Mobiles modules!");
-  };
 
-  const handleDisconnectDatabase = () => {
-    if (!confirm("Are you sure you want to disconnect from Google Sheets database?\n\nAutomatic sync will be paused until you enter a new Web App URL.")) return;
-    setUrlInput("");
-    updateSheetsConfig({ url: "", enabled: false, lastSync: undefined });
-    useStore.getState().updateSheetsConfig({ url: "", enabled: false, lastSync: undefined });
-    setTestResult(null);
-    toast.success("Database disconnected successfully! Enter your new deployment Web App URL below when ready to connect.");
-  };
 
   const handleSyncMobiles = async () => {
-    if (!sheetsConfig.url && !urlInput.trim()) {
-      toast.error("Please enter and save the Apps Script URL first");
+    if (!sheetsConfig.url) {
+      toast.error("No database URL configured");
       return;
     }
     setSyncing(true);
@@ -132,8 +108,8 @@ function SettingsPage() {
   };
 
   const handleSyncBoth = async () => {
-    if (!sheetsConfig.url && !urlInput.trim()) {
-      toast.error("Please enter and save the Apps Script URL first");
+    if (!sheetsConfig.url) {
+      toast.error("No database URL configured");
       return;
     }
     setSyncingBoth(true);
@@ -359,43 +335,17 @@ function SettingsPage() {
               </button>
             </div>
 
-            {/* URL Input — Admin only: this URL is shared by every device in both modules */}
-            {isAdmin ? (
-            <label className="block">
-              <span className="text-xs font-semibold text-muted-foreground">Apps Script Web App URL (shared for both Finance & Mobiles)</span>
-              <div className="mt-1.5 flex gap-2">
-                <input
-                  type="url"
-                  value={urlInput}
-                  onChange={(e) => { setUrlInput(e.target.value); setTestResult(null); }}
-                  placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-                  className="flex-1 h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 font-mono text-[11px]"
-                />
-                <button
-                  onClick={handleSaveUrl}
-                  className="h-9 px-3 rounded-md bg-foreground text-background text-xs font-semibold whitespace-nowrap hover:opacity-90 transition-opacity"
-                >
-                  {sheetsConfig.url ? "Update URL" : "Connect Database"}
-                </button>
-                {sheetsConfig.url && (
-                  <button
-                    onClick={handleDisconnectDatabase}
-                    className="h-9 px-3 rounded-md border border-danger/40 bg-danger/10 text-danger text-xs font-medium whitespace-nowrap hover:bg-danger/20 transition-colors"
-                  >
-                    Disconnect Database
-                  </button>
-                )}
-              </div>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                See <code className="bg-muted px-1 py-0.5 rounded text-[10px]">GOOGLE_SHEETS_SETUP.md</code> for step-by-step setup.
-              </p>
-            </label>
-            ) : (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30 border border-border text-xs text-muted-foreground">
-                <span>🔒</span>
-                <span>Only administrators can configure the sync URL. Current URL: <code className="font-mono">{sheetsConfig.url ? sheetsConfig.url.slice(0, 40) + "…" : "(not set)"}</code></span>
-              </div>
-            )}
+                {/* Permanent Database URL — read-only indicator */}
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-success/5 border border-success/20 text-xs">
+                  <CheckCircle2 className="size-4 text-success shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-success text-sm">Permanent Database Connected</div>
+                    <code className="text-[10px] text-muted-foreground font-mono break-all mt-0.5 block">
+                      {sheetsConfig.url ? sheetsConfig.url.slice(0, 60) + "…" : "(not set)"}
+                    </code>
+                    <p className="text-[10px] text-muted-foreground mt-1">This database URL is permanently built into the app — it works automatically on all devices without any setup.</p>
+                  </div>
+                </div>
 
             {/* Action Buttons — admin only */}
             {isAdmin && (
