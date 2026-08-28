@@ -1562,7 +1562,7 @@ export const useStore = create<State>()(
           duration: `${months} mo`,
           interest: `${input.interest}%`,
           status: "Active",
-          date: input.date || today(),
+          date: input.date ? formatDateToInr(input.date) : today(),
           collectedAmount: 0,
           paidEmis: 0,
         };
@@ -1745,10 +1745,6 @@ export const useStore = create<State>()(
         const totalRedeposited = currentTxs.filter(t => t.type === "Redeposit").reduce((s, t) => s + t.amount, 0);
         const currentTakenBalance = Math.max(0, totalWithdrawn - totalRedeposited);
 
-        if (input.amount > currentTakenBalance) {
-          throw new Error(`Cannot deposit ₹${input.amount.toLocaleString("en-IN")} which exceeds outstanding taken balance of ₹${currentTakenBalance.toLocaleString("en-IN")}`);
-        }
-
         const existing = currentTxs.filter((t) => t.id.startsWith("PR-"));
         const maxId = existing.reduce((max, t) => {
           const n = parseInt(t.id.replace("PR-", ""), 10);
@@ -1756,7 +1752,7 @@ export const useStore = create<State>()(
         }, 0);
         const id = "PR-" + (maxId + 1).toString().padStart(3, "0");
 
-        const newTakenBalance = currentTakenBalance - input.amount;
+        const newTakenBalance = Math.max(0, currentTakenBalance - input.amount);
 
         const txn: ProfitTransaction = {
           id,

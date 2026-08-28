@@ -758,30 +758,36 @@ function LoanDialog() {
   const { open, close } = useUi();
   const addLoan = useStore((s) => s.addLoan);
 
+  const [date, setDate] = useState(getTodayYmd());
   const [customer, setCustomer] = useState("");
   const [amount, setAmount] = useState("");
   const [deposit, setDeposit] = useState("");
-  const [interest, setInterest] = useState(INTEREST_OPTIONS[1] ?? "2");
-  const [months, setMonths] = useState("12");
+  const [interest, setInterest] = useState("");
+  const [months, setMonths] = useState("");
 
   useEffect(() => {
     if (open !== "loan") {
+      setDate(getTodayYmd());
       setCustomer("");
       setAmount("");
       setDeposit("");
-      setInterest(INTEREST_OPTIONS[1] ?? "2");
-      setMonths("12");
+      setInterest("");
+      setMonths("");
     }
   }, [open]);
 
   const amountNum = Number(amount) || 0;
   const depositNum = Number(deposit) || 0;
+  const interestNum = Number(interest) || 0;
+  const monthsNum = Number(months) || 0;
   const principal = Math.max(0, amountNum - depositNum);
-  const previewEmi = principal > 0 ? Math.round(calculateEmi(principal, Number(interest) || 0, Number(months) || 0)) : 0;
+  const previewEmi = principal > 0 && monthsNum > 0 ? Math.round(calculateEmi(principal, interestNum, monthsNum)) : 0;
+  const totalPayable = previewEmi * monthsNum;
+  const totalInterest = Math.max(0, totalPayable - principal);
 
   const depositExceedsAmount = depositNum > amountNum && amountNum > 0;
   const canSubmit =
-    !!customer.trim() && amountNum > 0 && depositNum >= 0 && !depositExceedsAmount;
+    !!customer.trim() && amountNum > 0 && depositNum >= 0 && !depositExceedsAmount && interest.trim() !== "" && months.trim() !== "" && !!date.trim();
 
   return (
     <Dialog open={open === "loan"} onOpenChange={(o) => !o && close()}>
@@ -791,6 +797,9 @@ function LoanDialog() {
           <DialogDescription>Register a loan for a customer.</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="col-span-2">
+            <Field label="Date" value={date} onChange={setDate} type="date" />
+          </div>
           <div className="col-span-2">
             <Field label="Customer / Borrower Name" value={customer} onChange={setCustomer} placeholder="e.g. Ramesh Kumar" />
           </div>
@@ -806,11 +815,34 @@ function LoanDialog() {
           </p>
         )}
 
-        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm flex items-center justify-between">
-          <span className="text-muted-foreground text-xs font-medium">Financed / Monthly EMI</span>
-          <span className="font-semibold">
-            ₹{principal.toLocaleString("en-IN")} · ₹{previewEmi.toLocaleString("en-IN")}/mo
-          </span>
+        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2 text-sm">
+          <div className="flex items-center justify-between text-xs text-muted-foreground font-semibold uppercase tracking-wider border-b border-border/60 pb-1.5">
+            <span>Financed & EMI Details</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-muted-foreground block">Financed Principal</span>
+              <span className="font-semibold text-sm">₹{principal.toLocaleString("en-IN")}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block">Monthly EMI</span>
+              <span className="font-semibold text-sm text-success">
+                ₹{previewEmi.toLocaleString("en-IN")}{monthsNum > 0 ? "/mo" : ""}
+              </span>
+            </div>
+            {monthsNum > 0 && principal > 0 && (
+              <>
+                <div>
+                  <span className="text-muted-foreground block">Total Interest</span>
+                  <span className="font-medium text-foreground">₹{totalInterest.toLocaleString("en-IN")}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Total Amount Payable</span>
+                  <span className="font-medium text-foreground">₹{totalPayable.toLocaleString("en-IN")}</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -823,8 +855,9 @@ function LoanDialog() {
                   customer: customer.trim(),
                   amount: amountNum,
                   deposit: depositNum,
-                  interest: Number(interest) || 0,
-                  months: Number(months) || 12,
+                  interest: interestNum,
+                  months: monthsNum,
+                  date,
                 });
                 toast.success(`Loan ${l.id} created for ${l.customer}`);
                 close();
@@ -1059,9 +1092,8 @@ function DepositProfitDialog() {
   const amountNum = Number(amount) || 0;
   const cashNum = Number(cashAmount) || 0;
   const upiNum = Number(upiAmount) || 0;
-  const isExceedingTaken = amountNum > currentTakenBalance;
   const isSplitValid = method !== "Cash & UPI" || (cashNum + upiNum === amountNum && amountNum > 0);
-  const canSubmit = amountNum > 0 && !isExceedingTaken && isSplitValid;
+  const canSubmit = amountNum > 0 && isSplitValid;
 
   const handleAmountChange = (val: string) => {
     setAmount(val);
@@ -1154,12 +1186,6 @@ function DepositProfitDialog() {
             onChange={setNotes}
             placeholder="e.g. Redepositing taken profit"
           />
-
-          {isExceedingTaken && (
-            <p className="text-xs text-danger font-medium">
-              ⛔ Cannot deposit ₹{amountNum.toLocaleString("en-IN")}, which exceeds taken profit balance of ₹{currentTakenBalance.toLocaleString("en-IN")}. You must deposit taken money only.
-            </p>
-          )}
         </div>
 
         <DialogFooter>
