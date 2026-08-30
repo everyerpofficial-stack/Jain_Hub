@@ -85,6 +85,9 @@ var ALLOWED_SHEETS = [
   // KYC/invoice document register. See the note on Finance_Documents in the
   // app: the row is the file's metadata, not the file's bytes.
   "Finance_Documents",
+  // Audit Logs (Finance & Mobiles)
+  "Finance_Audit",
+  "Mobiles_Audit",
 ];
 
 // ── Main GET Handler ──────────────────────────────────────────────────────────

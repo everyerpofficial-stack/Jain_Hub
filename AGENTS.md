@@ -1,10 +1,11 @@
-<!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
-<!-- LOVABLE:END -->
+# Jain Finance & Mobiles ERP — System Instructions & Guidelines
+
+## Overview
+This repository contains the production web application for **Jain Finance & Mobiles ERP**.
+- Built with React, TypeScript, Vite, TanStack Router, Tailwind CSS, and Zustand.
+- Google Sheets Web App backend integration via Google Apps Script.
+
+## Build & Quality Commands
+- `npm run dev`: Start local development server (Port 8080)
+- `npx tsc --noEmit`: Perform full TypeScript type-checking
+- `npm run build`: Build production bundle

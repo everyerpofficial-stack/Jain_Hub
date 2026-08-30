@@ -102,6 +102,36 @@ function LoansPage() {
         endDate={endDate}
       />
 
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        {(["Active", "Overdue", "Completed", "Defaulted"] as const).map((s) => {
+          const filteredByStatus = loans.filter((l) => l.status === s);
+          const total = filteredByStatus.reduce((sum, l) => sum + parseAmount(l.amount), 0);
+          const toneVal = s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Completed" ? "neutral" : "danger";
+          const isActiveCard = statusFilter === s;
+          return (
+            <Card
+              key={s}
+              className={`p-5 cursor-pointer transition-shadow hover:shadow-sm ${
+                isActiveCard ? "ring-2 ring-foreground/70 shadow-sm" : ""
+              }`}
+              onClick={() => setStatusFilter(isActiveCard ? "All" : s)}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs text-muted-foreground">{s} loans</div>
+                <Badge tone={toneVal}>{s}</Badge>
+              </div>
+              <div className="mt-1 text-2xl font-semibold tracking-tight">₹{total.toLocaleString("en-IN")}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {filteredByStatus.length} {filteredByStatus.length === 1 ? "loan" : "loans"} · principal
+              </div>
+              <div className="mt-2 text-[11px] font-medium text-muted-foreground/80">
+                {isActiveCard ? "Filtering the list below · click to clear" : "Click to filter the list below"}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
       <Card>
         <div className="p-4 border-b border-border flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[240px]">
@@ -194,37 +224,6 @@ function LoansPage() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
-        {(["Active", "Overdue", "Completed", "Defaulted"] as const).map((s) => {
-          const filteredByStatus = loans.filter((l) => l.status === s);
-          const total = filteredByStatus.reduce((sum, l) => sum + parseAmount(l.amount), 0);
-          const toneVal = s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Completed" ? "neutral" : "danger";
-          const isActiveCard = statusFilter === s;
-          return (
-            <Card
-              key={s}
-              // Clicking already set the filter, but nothing on the card said
-              // so and the table is a full screen above it — so the card read
-              // as dead. It now shows the selected state and toggles off.
-              className={`p-5 cursor-pointer transition-shadow hover:shadow-sm ${
-                isActiveCard ? "ring-2 ring-foreground/70 shadow-sm" : ""
-              }`}
-              onClick={() => setStatusFilter(isActiveCard ? "All" : s)}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-xs text-muted-foreground">{s} loans</div>
-                <Badge tone={toneVal}>{s}</Badge>
-              </div>
-              <div className="mt-1 text-2xl font-semibold tracking-tight">{filteredByStatus.length}</div>
-              <div className="mt-1 text-xs text-muted-foreground">₹{total.toLocaleString("en-IN")} principal</div>
-              <div className="mt-2 text-[11px] font-medium text-muted-foreground/80">
-                {isActiveCard ? "Filtering the list above · click to clear" : "Click to filter the list above"}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
       {collectingLoan && (
         <CollectLoanPaymentDialog loan={collectingLoan} onClose={() => setCollectingLoan(null)} />
       )}
@@ -239,9 +238,12 @@ function CollectLoanPaymentDialog({ loan, onClose }: { loan: Loan; onClose: () =
   const totalAmountNum = parseAmount(loan.amount);
   const depositNum = parseAmount(loan.deposit);
   const emiNum = parseAmount(loan.emi);
+  const durationMonths = parseInt(String(loan.duration ?? "").replace(/\D/g, ""), 10) || 0;
   const netPrincipal = Math.max(0, totalAmountNum - depositNum);
+  const calculatedTotalPayable = emiNum > 0 && durationMonths > 0 ? Math.round(emiNum * durationMonths) : netPrincipal;
+  const totalPayable = Math.max(netPrincipal, calculatedTotalPayable);
   const alreadyCollected = loan.collectedAmount || 0;
-  const remainingBalance = Math.max(0, netPrincipal - alreadyCollected);
+  const remainingBalance = Math.max(0, totalPayable - alreadyCollected);
 
   const defaultAmt = remainingBalance > 0 ? (emiNum > 0 && emiNum <= remainingBalance ? emiNum : remainingBalance) : 0;
 
@@ -291,6 +293,12 @@ function CollectLoanPaymentDialog({ loan, onClose }: { loan: Loan; onClose: () =
               <span className="text-muted-foreground">Loan Principal:</span>
               <span className="font-bold">₹{netPrincipal.toLocaleString("en-IN")}</span>
             </div>
+            {totalPayable !== netPrincipal && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total Payable (incl. interest):</span>
+                <span className="font-bold text-foreground">₹{totalPayable.toLocaleString("en-IN")}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Monthly EMI:</span>
               <span className="font-bold">{loan.emi}</span>

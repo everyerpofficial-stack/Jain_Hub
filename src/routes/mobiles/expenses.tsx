@@ -23,9 +23,13 @@ export const Route = createFileRoute("/mobiles/expenses")({
 function ExpenseFormDialog({ onClose }: { onClose: () => void }) {
   const addExpense = useMobileStore((s) => s.addExpense);
   const [type, setType] = useState<"Expense" | "Income">("Expense");
+  const allExpenses = useMobileStore((s) => s.expenses);
+  const currentIncome = allExpenses.filter((e) => e.type === "Income").reduce((sum, e) => sum + parseAmount(e.amount), 0);
+  const currentExpense = allExpenses.filter((e) => e.type !== "Income").reduce((sum, e) => sum + parseAmount(e.amount), 0);
+  const currentNetBalance = currentIncome - currentExpense;
   
   const EXPENSE_CATEGORIES = ["Shop Rent", "Electricity", "Salary", "Tea & Snacks", "Utilities", "Marketing", "Other Expense"];
-  const INCOME_CATEGORIES = ["Accessories Income", "Repair Income", "Device Sales Income", "Other Income"];
+  const INCOME_CATEGORIES = ["Capital Infusion / Owner Investment", "Opening Cash Balance", "Accessories Income", "Repair Income", "Device Sales Income", "Other Income"];
 
   const getTodayYmd = () => {
     const d = new Date();
@@ -45,7 +49,7 @@ function ExpenseFormDialog({ onClose }: { onClose: () => void }) {
 
   // Reset category when entry type changes
   useEffect(() => {
-    setCat(type === "Expense" ? "Shop Rent" : "Accessories Income");
+    setCat(type === "Expense" ? "Shop Rent" : "Capital Infusion / Owner Investment");
   }, [type]);
 
   const canSubmit = cat && amount && desc.trim() && date;
@@ -127,6 +131,28 @@ function ExpenseFormDialog({ onClose }: { onClose: () => void }) {
               <option value="Income">Income</option>
             </select>
           </label>
+
+          {type === "Expense" && currentNetBalance <= 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              <div className="font-semibold text-amber-800 dark:text-amber-300">
+                💡 Store Cash Balance is ₹{currentNetBalance.toLocaleString("en-IN")}
+              </div>
+              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                Recording a ₹{(Number(amount) || 0).toLocaleString("en-IN")} expense will result in a net balance of -₹{Math.abs(currentNetBalance - (Number(amount) || 0)).toLocaleString("en-IN")}. If funds were added to the shop by the owner, record <strong>Opening Cash Balance</strong> or <strong>Capital Infusion</strong> under Income.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setType("Income");
+                  setCat("Capital Infusion / Owner Investment");
+                  setDesc("Owner initial cash investment into store");
+                }}
+                className="mt-2 text-xs font-semibold text-primary underline hover:opacity-80 block"
+              >
+                + Record Capital Infusion / Opening Cash (+ Income)
+              </button>
+            </div>
+          )}
 
           <label className="block">
             <span className="text-xs font-semibold text-muted-foreground">Category</span>

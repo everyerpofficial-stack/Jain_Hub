@@ -654,6 +654,19 @@ export function CashFlowDashboard() {
                 totalExpenses: totalExp,
                 netBalance: totalInc - totalExp,
                 periodLabel: presetLabels[filterPreset] || "All Time",
+                cards6: {
+                  cashIn: stats.cashIn,
+                  bankIn: stats.bankIn,
+                  totalOutflows: stats.totalOutflow,
+                  netCash: stats.netCash,
+                  netBank: stats.netBank,
+                  netConsolidated: stats.netConsolidated,
+                },
+                reconciliationTable: {
+                  finance: breakdownStats.Finance,
+                  mobiles: breakdownStats.Mobiles,
+                  combined: breakdownStats.Combined,
+                },
                 entries: activeRawItems.map((item) => ({
                   id: item.id,
                   date: item.date,

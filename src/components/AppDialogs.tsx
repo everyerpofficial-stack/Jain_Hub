@@ -43,11 +43,12 @@ const getTodayYmd = () => {
 
 // ---- Shared form components ----
 function Field({
-  label, value, onChange, placeholder, type = "text", readOnly = false, highlight = false, maxLength, inputMode,
+  label, value, onChange, placeholder, type = "text", readOnly = false, highlight = false, maxLength, inputMode, min,
 }: {
   label: string; value: string | number; onChange?: (v: string) => void;
   placeholder?: string; type?: string; readOnly?: boolean; highlight?: boolean;
   maxLength?: number; inputMode?: "search" | "text" | "email" | "tel" | "url" | "numeric" | "decimal" | "none";
+  min?: string | number;
 }) {
   return (
     <label className="block">
@@ -56,8 +57,15 @@ function Field({
         type={type}
         inputMode={inputMode}
         maxLength={maxLength}
+        min={min ?? (type === "number" ? 0 : undefined)}
         value={value}
-        onChange={(e) => onChange?.(e.target.value)}
+        onChange={(e) => {
+          let val = e.target.value;
+          if (type === "number") {
+            val = val.replace(/-/g, "");
+          }
+          onChange?.(val);
+        }}
         placeholder={placeholder}
         readOnly={readOnly}
         className={`mt-1 h-9 w-full rounded-md border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 ${
@@ -163,8 +171,8 @@ function CustomerDialog() {
   const [deposit, setDeposit] = useState("");
   const [interestRate, setInterestRate] = useState("5");
   const [noOfEmi, setNoOfEmi] = useState("6");
-  const [emiDate, setEmiDate] = useState("");
   const [billDate, setBillDate] = useState(getTodayYmd());
+  const [emiDate, setEmiDate] = useState(getTodayYmd());
   const [fileChargeVal, setFileChargeVal] = useState("");
 
   // Auto-calculate file charge (10% of price) when price changes
@@ -180,20 +188,26 @@ function CustomerDialog() {
   const [aadhaarFile, setAadhaarFile] = useState<{ name: string; url: string; size: string } | undefined>(undefined);
   const [photoFile, setPhotoFile] = useState<{ name: string; url: string; size: string } | undefined>(undefined);
 
-
-
   // Reset form when dialog closes
   useEffect(() => {
     if (open !== "customer") {
       setFirstName(""); setFatherName(""); setSurname(""); setMobile(""); setAadhaar("");
       setGuarantyName(""); setGuarantyMobile(""); setRegion(REGIONS[0]); setVillage(VILLAGES_BY_REGION[REGIONS[0]]?.[0] || "");
       setMobileBrand(Object.keys(MOBILE_BRANDS)[0] || "Apple"); setRamRom("4GB/64GB"); setImei1(""); setImei2("");
-      setPrice(""); setDeposit(""); setInterestRate("5"); setNoOfEmi("6"); setEmiDate("");
+      setPrice(""); setDeposit(""); setInterestRate("5"); setNoOfEmi("6");
       setBillDate(getTodayYmd());
+      setEmiDate(getTodayYmd());
       setFileChargeVal("");
       setAadhaarFile(undefined); setPhotoFile(undefined);
     }
   }, [open]);
+
+  const handleBillDateChange = (val: string) => {
+    setBillDate(val);
+    if (!emiDate || emiDate === billDate) {
+      setEmiDate(val);
+    }
+  };
 
   // Auto calculations
   const priceNum = Number(price) || 0;
@@ -207,7 +221,22 @@ function CustomerDialog() {
   const isMobileValid = /^\d{10}$/.test(mobile.trim());
   const isAadhaarValid = /^\d{12}$/.test(aadhaar.trim());
   const isGuarantyMobileValid = !guarantyMobile.trim() || /^\d{10}$/.test(guarantyMobile.trim());
-  const canSubmit = firstName.trim() && isMobileValid && isAadhaarValid && isGuarantyMobileValid && mobileModel && priceNum > 0 && emiDate.trim() && billDate.trim();
+
+  const getValidationError = (): string | null => {
+    if (!firstName.trim()) return "Please enter Customer First Name";
+    if (!mobile.trim()) return "Please enter Mobile Number";
+    if (!isMobileValid) return "Mobile Number must be exactly 10 digits";
+    if (!aadhaar.trim()) return "Please enter Aadhaar Card Number";
+    if (!isAadhaarValid) return "Aadhaar Card Number must be exactly 12 digits";
+    if (guarantyMobile.trim() && !isGuarantyMobileValid) return "Guarantor Mobile Number must be exactly 10 digits";
+    if (!mobileModel.trim()) return "Please enter Mobile Model Name";
+    if (!priceNum || priceNum <= 0) return "Please enter a valid Device Price (₹)";
+    if (!billDate.trim()) return "Please select Finance Creation Date";
+    if (!emiDate.trim()) return "Please select EMI Start Date";
+    return null;
+  };
+
+  const canSubmit = !getValidationError();
 
   // Both uploads go through readFileForStorage, which downscales camera-sized
   // images. Storing them raw was what exhausted this browser's storage budget
@@ -395,7 +424,7 @@ function CustomerDialog() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Finance Creation Date" value={billDate} onChange={setBillDate} type="date" />
+              <Field label="Finance Creation Date" value={billDate} onChange={handleBillDateChange} type="date" />
               <Field label="EMI Start Date" value={emiDate} onChange={setEmiDate} type="date" />
             </div>
           </div>
@@ -404,17 +433,17 @@ function CustomerDialog() {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-border flex items-center justify-between gap-3 bg-surface/50 rounded-b-xl">
           <p className="text-xs text-muted-foreground">
-            {canSubmit ? `✓ Ready to register ${firstName} ${surname}` : "Fill all required fields"}
+            {canSubmit ? `✓ Ready to register ${firstName} ${surname}` : (getValidationError() || "Fill all required fields")}
           </p>
           <div className="flex gap-2">
             <GhostBtn onClick={close}>Cancel</GhostBtn>
             <PrimaryBtn
-              disabled={!canSubmit}
               onClick={() => {
-                // Anything that throws in here (a bad record already in the
-                // store, a full localStorage) used to abort before close(),
-                // leaving the dialog stuck open with no explanation. Report
-                // the failure and always let the user out of the form.
+                const valErr = getValidationError();
+                if (valErr) {
+                  toast.error(valErr);
+                  return;
+                }
                 try {
                   const c = addCustomer({
                     firstName: firstName.trim(),
@@ -425,7 +454,7 @@ function CustomerDialog() {
                     guarantyName: guarantyName.trim(),
                     guarantyMobile: guarantyMobile.trim(),
                     region, village,
-                    mobileBrand, mobileModel, ramRom,
+                    mobileBrand, mobileModel: mobileModel.trim(), ramRom,
                     imei1: imei1.trim(), imei2: imei2.trim(),
                     price: priceNum, deposit: depositNum,
                     interestRate: interestNum, noOfEmi: emiCount,
@@ -436,13 +465,14 @@ function CustomerDialog() {
                     photoFile,
                   });
                   toast.success(`Customer ${c.id} registered — ${mobileBrand} ${mobileModel}`);
+                  close();
                 } catch (err) {
                   console.error("[CustomerDialog] registration failed:", err);
                   toast.error("Could not register the customer", {
                     description: err instanceof Error ? err.message : "Please try again.",
                   });
+                  close();
                 }
-                close();
               }}
             >
               Register Customer
@@ -636,6 +666,7 @@ function CollectDialog() {
 function ExpenseDialog() {
   const { open, close } = useUi();
   const addExpense = useStore((s) => s.addExpense);
+  const expenses = useStore((s) => s.expenses);
   const [type, setType] = useState<"Expense" | "Income">("Expense");
   const [cat, setCat] = useState("Office Expense");
   const [desc, setDesc] = useState("");
@@ -643,12 +674,16 @@ function ExpenseDialog() {
   const [date, setDate] = useState(getTodayYmd());
   const [method, setMethod] = useState<string>("Cash");
 
-  const EXPENSE_CATEGORIES = ["Office Expense", "Salary", "Travel", "Utilities", "Maintenance", "Marketing"];
-  const INCOME_CATEGORIES = ["Interest Collection", "File Charge Income", "Capital Inflow", "Other Income"];
+  const totalIncome = expenses.filter((e) => e.type === "Income").reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const totalExpense = expenses.filter((e) => e.type !== "Income").reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const netBalance = totalIncome - totalExpense;
+
+  const EXPENSE_CATEGORIES = ["Office Expense", "Salary", "Travel", "Utilities", "Maintenance", "Marketing", "Other Expense"];
+  const INCOME_CATEGORIES = ["Capital Infusion / Owner Investment", "Opening Cash Balance", "Interest Collection", "File Charge Income", "Capital Inflow", "Other Income"];
 
   // Reset category when entry type changes
   useEffect(() => {
-    setCat(type === "Expense" ? "Office Expense" : "Interest Collection");
+    setCat(type === "Expense" ? "Office Expense" : "Capital Infusion / Owner Investment");
   }, [type]);
 
   // Reset all states on close/open
@@ -679,6 +714,29 @@ function ExpenseDialog() {
             options={type === "Expense" ? EXPENSE_CATEGORIES : INCOME_CATEGORIES} />
           <Field label="Amount (₹)" value={amount} onChange={setAmount} type="number" placeholder="1000" highlight />
           <Select label="Payment Method" value={method} onChange={setMethod} options={["Cash", "Bank", "Cash & Bank"]} />
+
+          {type === "Expense" && netBalance <= 0 && (
+            <div className="col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              <div className="font-semibold text-amber-800 dark:text-amber-300">
+                💡 Company Net Balance is ₹{netBalance.toLocaleString("en-IN")}
+              </div>
+              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                Recording a ₹{(Number(amount) || 0).toLocaleString("en-IN")} expense will result in net balance of -₹{Math.abs(netBalance - (Number(amount) || 0)).toLocaleString("en-IN")}. If funds were invested into the firm, add <strong>Opening Cash Balance</strong> or <strong>Capital Infusion</strong> under Income.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setType("Income");
+                  setCat("Capital Infusion / Owner Investment");
+                  setDesc("Owner initial capital investment");
+                }}
+                className="mt-2 text-xs font-semibold text-primary underline hover:opacity-80 block"
+              >
+                + Switch to Add Capital / Opening Cash (+ Income)
+              </button>
+            </div>
+          )}
+
           <div className="col-span-2">
             <Field label="Description" value={desc} onChange={setDesc} placeholder="e.g. Office electricity bill, EMI collection cash..." />
           </div>

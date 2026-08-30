@@ -13,12 +13,13 @@
 import { useEffect, useRef } from "react";
 import {
   useStore, recalculateLoanStatuses, seedStaff,
-  loanRow, profitTransactionRow, customerRow, paymentRow, documentRow,
+  loanRow, profitTransactionRow, customerRow, paymentRow, documentRow, auditRow, auditFromRow,
 } from "./store";
 import {
   useMobileStore,
   saleRow, purchaseRow, productRow, supplierRow, mobileCustomerRow,
   mobileExpenseRow, accessoryRow, supplierPaymentRow, warrantyRow,
+  auditRow as mobileAuditRow, auditFromRow as mobileAuditFromRow,
   itemsFromSheet, safeItems,
   mobileSettingsRow, MOBILE_SETTINGS_ROW_ID,
 } from "./mobileStore";
@@ -68,7 +69,7 @@ export async function triggerManualSync(forceAll = false): Promise<boolean> {
  * - Preserves local records that have not been explicitly deleted by the user.
  * - Re-uploads local un-synced records to Google Sheets.
  */
-function safeReconcile<T extends { id: string }>(
+function safeReconcile<T extends { id?: string }>(
   url: string,
   sheet: SheetName,
   rows: T[],
@@ -353,6 +354,11 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
         safeReconcile(url, "Finance_Investments", rows as any[], finState.investments, setFin, "investments");
       }
 
+      if (sheet === "Finance_Audit") {
+        const sanitized = rows.map(auditFromRow);
+        safeReconcile(url, "Finance_Audit", sanitized, finState.audit, setFin, "audit", auditRow);
+      }
+
       if (sheet === "Finance_Staff") {
         const validRows = rows.filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()));
         if (validRows.length > 0) {
@@ -528,6 +534,7 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
       if (sheet === "Mobiles_Accessories")      safeReconcile(url, "Mobiles_Accessories",      rows, mobState.accessories,      setMob, "accessories", accessoryRow);
       if (sheet === "Mobiles_SupplierPayments") safeReconcile(url, "Mobiles_SupplierPayments", rows, mobState.supplierPayments || [], setMob, "supplierPayments", supplierPaymentRow);
       if (sheet === "Mobiles_WarrantyClaims")   safeReconcile(url, "Mobiles_WarrantyClaims",   rows, mobState.warranties || [], setMob, "warranties", warrantyRow);
+      if (sheet === "Mobiles_Audit")            safeReconcile(url, "Mobiles_Audit",            rows, mobState.audit || [],      setMob, "audit", mobileAuditRow);
 
       // Shop profile is a single fixed-id row, not a list, so it does not go
       // through safeReconcile — last write from any device wins.

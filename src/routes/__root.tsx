@@ -10,7 +10,6 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { AppDialogs } from "@/components/AppDialogs";
 import { useStore } from "../lib/store";
@@ -68,7 +67,6 @@ export function ErrorComponent({ error, reset }: { error: Error; reset: () => vo
   const chunkError = isChunkLoadError(error);
 
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
     // A stale chunk after a redeploy can't be fixed by re-running loaders —
     // the module is permanently 404ing until the page fetches the new
     // manifest, so recover automatically instead of leaving the user stuck.

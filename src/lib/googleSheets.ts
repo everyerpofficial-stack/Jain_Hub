@@ -44,7 +44,9 @@ export type SheetName =
   | "Mobiles_Accessories"
   | "Mobiles_WarrantyClaims"
   | "Mobiles_Settings"
-  | "Finance_Documents";
+  | "Finance_Documents"
+  | "Finance_Audit"
+  | "Mobiles_Audit";
 
 /** Generic row — each value is serialised to string in the sheet */
 export type SheetRow = Record<string, string | number | boolean | undefined | null>;

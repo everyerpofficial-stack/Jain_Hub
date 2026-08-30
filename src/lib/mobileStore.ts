@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { safeLocalStorage } from "./safeStorage";
-import { formatDateToInr, parseAppDate } from "./store";
+import { formatDateToInr, parseAppDate, useStore } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
 import { enqueueWrite, markIdDeleted } from "./syncQueue";
@@ -258,6 +258,7 @@ export interface MobileExpense {
 }
 
 export interface MobileAuditEntry {
+  id?: string;
   ts: string;
   user: string;
   action: string;
@@ -278,7 +279,7 @@ interface MobilesState {
   supplierPayments: SupplierPayment[];
   expenses: MobileExpense[];
   audit: MobileAuditEntry[];
-  pushAudit: (e: Omit<MobileAuditEntry, "ts">) => void;
+  pushAudit: (e: { action: string; target: string; user?: string; id?: string }) => void;
 
   // Actions
   addExpense: (e: Omit<MobileExpense, "id" | "date"> & { date?: string }) => MobileExpense;
@@ -601,6 +602,30 @@ export function warrantyRow(w: MobileWarrantyClaim): SheetRow {
   };
 }
 
+export function auditRow(a: MobileAuditEntry): SheetRow {
+  const tsId = String(a.ts || "").replace(/[^a-zA-Z0-9]/g, "_");
+  const actionId = String(a.action || "").replace(/[^a-zA-Z0-9]/g, "_");
+  const userId = String(a.user || "").replace(/[^a-zA-Z0-9]/g, "_");
+  const rowId = a.id || `AUD-M-${tsId}-${userId}-${actionId}`;
+  return {
+    id: rowId,
+    ts: a.ts,
+    user: a.user,
+    action: a.action,
+    target: a.target,
+  };
+}
+
+export function auditFromRow(r: SheetRow): MobileAuditEntry {
+  return {
+    id: String(r.id ?? ""),
+    ts: String(r.ts ?? ""),
+    user: String(r.user ?? "System"),
+    action: String(r.action ?? "Action"),
+    target: String(r.target ?? "—"),
+  };
+}
+
 // ── Per-record sync helpers ─────────────────────────────────────────────────
 // Mutators call these instead of the full syncToSheets(), so a single add/
 // edit/delete only ever touches its own row(s) on the shared sheet — see
@@ -643,15 +668,20 @@ export const useMobileStore = create<MobilesState>()(
       supplierPayments: [],
       expenses: initialExpenses,
       audit: seedMobileAudit,
-      pushAudit: (e) => set((s) => ({
-        audit: [
-          {
-            ts: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
-            ...e
-          },
-          ...s.audit
-        ]
-      })),
+      pushAudit: (e) => {
+        const currentUser = useStore.getState().currentUser;
+        const user = e.user || currentUser?.name || "Admin";
+        const ts = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        const entry: MobileAuditEntry = {
+          id: e.id || `AUD-M-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          ts,
+          user,
+          action: e.action,
+          target: e.target,
+        };
+        set((s) => ({ audit: [entry, ...s.audit] }));
+        syncUpsert(get, "Mobiles_Audit", auditRow(entry), "mobiles audit log");
+      },
       sheetsConfig: {
         url: PERMANENT_SHEETS_URL,
         enabled: true,
@@ -685,6 +715,10 @@ export const useMobileStore = create<MobilesState>()(
         // quantities are re-derived from the purchase/sale ledgers instead.
         get().recomputeInventory();
         syncUpsert(get, "Mobiles_Products", productRow(newProduct), "product add");
+        get().pushAudit({
+          action: "Created Product",
+          target: `${newProduct.brand} ${newProduct.name} (${id}) · Selling Price: ₹${newProduct.sellingPrice}`,
+        });
       },
 
       updateProduct: (id, updatedFields) => {
@@ -711,15 +745,26 @@ export const useMobileStore = create<MobilesState>()(
         });
         get().recomputeInventory();
         const updatedProduct = get().products.find((p) => p.id === id);
-        if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product update");
+        if (updatedProduct) {
+          syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product update");
+          get().pushAudit({
+            action: "Updated Product",
+            target: `${updatedProduct.brand} ${updatedProduct.name} (${id})`,
+          });
+        }
       },
 
       deleteProduct: (id) => {
+        const deletedP = get().products.find((p) => p.id === id);
         set((state) => ({
           products: state.products.filter((p) => p.id !== id),
           inventory: state.inventory.filter((inv) => inv.productId !== id)
         }));
         syncDelete(get, "Mobiles_Products", id, "product delete");
+        get().pushAudit({
+          action: "Deleted Product",
+          target: `Product ID: ${id} ${deletedP ? `(${deletedP.brand} ${deletedP.name})` : ""}`,
+        });
       },
 
       recomputeInventory: () => {
@@ -799,6 +844,10 @@ export const useMobileStore = create<MobilesState>()(
         const newSupplier: MobileSupplier = { ...s, id, outstanding: 0 };
         set((state) => ({ suppliers: [...state.suppliers, newSupplier] }));
         syncUpsert(get, "Mobiles_Suppliers", supplierRow(newSupplier), "supplier add");
+        get().pushAudit({
+          action: "Added Supplier",
+          target: `${newSupplier.name} (${newSupplier.contact || "No Contact"})`,
+        });
       },
 
       updateSupplier: (id, updatedFields) => {
@@ -806,12 +855,23 @@ export const useMobileStore = create<MobilesState>()(
           suppliers: state.suppliers.map((s) => (s.id === id ? { ...s, ...updatedFields } : s))
         }));
         const updatedSupplier = get().suppliers.find((s) => s.id === id);
-        if (updatedSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier update");
+        if (updatedSupplier) {
+          syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier update");
+          get().pushAudit({
+            action: "Updated Supplier",
+            target: `Supplier ID: ${id} (${updatedSupplier.name})`,
+          });
+        }
       },
 
       deleteSupplier: (id) => {
+        const deletedSup = get().suppliers.find((s) => s.id === id);
         set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id) }));
         syncDelete(get, "Mobiles_Suppliers", id, "supplier delete");
+        get().pushAudit({
+          action: "Deleted Supplier",
+          target: `Supplier ID: ${id} ${deletedSup ? `(${deletedSup.name})` : ""}`,
+        });
       },
 
       paySupplier: (id, amount, date, remark, paymentMode = "Cash", cashAmount, bankAmount) => {
@@ -840,6 +900,10 @@ export const useMobileStore = create<MobilesState>()(
         syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment");
         const updatedSupplier = get().suppliers.find((s) => s.id === supplier.id);
         if (updatedSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier balance (from payment)");
+        get().pushAudit({
+          action: "Vendor Payment",
+          target: `Paid ₹${amount.toLocaleString("en-IN")} to ${supplier.name} (${paymentMode})`,
+        });
       },
 
       recordPurchase: (pur) => {
@@ -960,6 +1024,10 @@ export const useMobileStore = create<MobilesState>()(
             if (latestPayment) syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(latestPayment), "supplier payment (from purchase)");
           }
         }
+        get().pushAudit({
+          action: "Recorded Purchase",
+          target: `Invoice #${pur.invoiceNo} from ${newPurchase.supplierName} · Total: ₹${total.toLocaleString("en-IN")}`,
+        });
         return newPurchase;
       },
 
@@ -1024,6 +1092,10 @@ export const useMobileStore = create<MobilesState>()(
           if (updatedSup) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSup), "supplier balance update");
         }
         syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment log");
+        get().pushAudit({
+          action: "Purchase Balance Payment",
+          target: `Paid ₹${payAmt.toLocaleString("en-IN")} towards Invoice #${purchase.invoiceNo} (${purchase.supplierName})`,
+        });
       },
 
       createBill: (saleInput) => {
@@ -1090,6 +1162,10 @@ export const useMobileStore = create<MobilesState>()(
           const updatedProduct = get().products.find((p) => p.id === item.productId);
           if (updatedProduct) syncUpsert(get, "Mobiles_Products", productRow(updatedProduct), "product (from sale)");
         });
+        get().pushAudit({
+          action: "Created Sales Bill",
+          target: `Bill ${id} for ${saleInput.customerName} · Total: ₹${totalAmount.toLocaleString("en-IN")} (${saleInput.paymentMethod || "Cash"})`,
+        });
         return newSale;
       },
 
@@ -1134,6 +1210,10 @@ export const useMobileStore = create<MobilesState>()(
         const newCustomer: MobileCustomer = { ...c, id, registeredDate };
         set((state) => ({ customers: [...state.customers, newCustomer] }));
         syncUpsert(get, "Mobiles_Customers", mobileCustomerRow(newCustomer), "customer add");
+        get().pushAudit({
+          action: "Registered Customer",
+          target: `${newCustomer.name} (${newCustomer.mobile})`,
+        });
         return newCustomer;
       },
 
@@ -1142,12 +1222,23 @@ export const useMobileStore = create<MobilesState>()(
           customers: state.customers.map((c) => (c.id === id ? { ...c, ...updatedFields } : c))
         }));
         const updatedCustomer = get().customers.find((c) => c.id === id);
-        if (updatedCustomer) syncUpsert(get, "Mobiles_Customers", mobileCustomerRow(updatedCustomer), "customer update");
+        if (updatedCustomer) {
+          syncUpsert(get, "Mobiles_Customers", mobileCustomerRow(updatedCustomer), "customer update");
+          get().pushAudit({
+            action: "Updated Customer",
+            target: `Customer ID: ${id} (${updatedCustomer.name})`,
+          });
+        }
       },
 
       deleteCustomer: (id) => {
+        const deletedCust = get().customers.find((c) => c.id === id);
         set((state) => ({ customers: state.customers.filter((c) => c.id !== id) }));
         syncDelete(get, "Mobiles_Customers", id, "customer delete");
+        get().pushAudit({
+          action: "Deleted Customer",
+          target: `Customer ID: ${id} ${deletedCust ? `(${deletedCust.name})` : ""}`,
+        });
       },
 
       addImei: (imei) => {
@@ -1167,6 +1258,10 @@ export const useMobileStore = create<MobilesState>()(
         const newAccessory: MobileAccessory = { ...a, id, status: getQtyStatus(a.stock, a.minLimit) };
         set((state) => ({ accessories: [...state.accessories, newAccessory] }));
         syncUpsert(get, "Mobiles_Accessories", accessoryRow(newAccessory), "accessory add");
+        get().pushAudit({
+          action: "Added Accessory",
+          target: `${newAccessory.name} · Stock Qty: ${newAccessory.stock}`,
+        });
       },
 
       updateAccessory: (id, updatedFields) => {
@@ -1185,12 +1280,23 @@ export const useMobileStore = create<MobilesState>()(
           })
         }));
         const updatedAccessory = get().accessories.find((a) => a.id === id);
-        if (updatedAccessory) syncUpsert(get, "Mobiles_Accessories", accessoryRow(updatedAccessory), "accessory update");
+        if (updatedAccessory) {
+          syncUpsert(get, "Mobiles_Accessories", accessoryRow(updatedAccessory), "accessory update");
+          get().pushAudit({
+            action: "Updated Accessory",
+            target: `Accessory ID: ${id} (${updatedAccessory.name})`,
+          });
+        }
       },
 
       deleteAccessory: (id) => {
+        const deletedAcc = get().accessories.find((a) => a.id === id);
         set((state) => ({ accessories: state.accessories.filter((a) => a.id !== id) }));
         syncDelete(get, "Mobiles_Accessories", id, "accessory delete");
+        get().pushAudit({
+          action: "Deleted Accessory",
+          target: `Accessory ID: ${id} ${deletedAcc ? `(${deletedAcc.name})` : ""}`,
+        });
       },
 
       sellAccessory: (id, qty) => {
@@ -1204,7 +1310,13 @@ export const useMobileStore = create<MobilesState>()(
           })
         }));
         const soldAccessory = get().accessories.find((a) => a.id === id);
-        if (soldAccessory) syncUpsert(get, "Mobiles_Accessories", accessoryRow(soldAccessory), "accessory sell");
+        if (soldAccessory) {
+          syncUpsert(get, "Mobiles_Accessories", accessoryRow(soldAccessory), "accessory sell");
+          get().pushAudit({
+            action: "Sold Accessory",
+            target: `Sold ${qty}x ${soldAccessory.name} (${id})`,
+          });
+        }
       },
 
       addWarrantyClaim: (w) => {
@@ -1213,6 +1325,10 @@ export const useMobileStore = create<MobilesState>()(
         const newClaim: MobileWarrantyClaim = { ...w, id, claimDate, status: "Pending" };
         set((state) => ({ warranties: [...state.warranties, newClaim] }));
         syncUpsert(get, "Mobiles_WarrantyClaims", warrantyRow(newClaim), "warranty add");
+        get().pushAudit({
+          action: "Recorded Warranty Claim",
+          target: `Claim ${newClaim.id} for ${w.customerName} (${w.productName})`,
+        });
       },
 
       updateWarrantyStatus: (id, status) => {
@@ -1220,12 +1336,22 @@ export const useMobileStore = create<MobilesState>()(
           warranties: state.warranties.map((w) => (w.id === id ? { ...w, status } : w))
         }));
         const updatedClaim = get().warranties.find((w) => w.id === id);
-        if (updatedClaim) syncUpsert(get, "Mobiles_WarrantyClaims", warrantyRow(updatedClaim), "warranty status update");
+        if (updatedClaim) {
+          syncUpsert(get, "Mobiles_WarrantyClaims", warrantyRow(updatedClaim), "warranty status update");
+          get().pushAudit({
+            action: "Updated Warranty Status",
+            target: `Claim ${id} status set to ${status}`,
+          });
+        }
       },
 
       updateSettings: (updatedSettings) => {
         set((state) => ({ settings: { ...state.settings, ...updatedSettings } }));
         syncUpsert(get, "Mobiles_Settings", mobileSettingsRow(get().settings), "store profile");
+        get().pushAudit({
+          action: "Updated Settings",
+          target: `Updated Mobiles shop & GST settings`,
+        });
       },
 
       addExpense: (input) => {
@@ -1251,14 +1377,23 @@ export const useMobileStore = create<MobilesState>()(
           expenses: [newExpense, ...state.expenses]
         }));
         syncUpsert(get, "Mobiles_Expenses", mobileExpenseRow(newExpense), "expense");
+        get().pushAudit({
+          action: "Added Expense",
+          target: `[${newExpense.type}] ${newExpense.cat}: ${newExpense.desc} · ${newExpense.amount}`,
+        });
         return newExpense;
       },
 
       deleteExpense: (id) => {
+        const deletedExp = get().expenses.find((e) => e.id === id);
         set((state) => ({
           expenses: state.expenses.filter((e) => e.id !== id)
         }));
         syncDelete(get, "Mobiles_Expenses", id, "expense delete");
+        get().pushAudit({
+          action: "Deleted Expense",
+          target: `Expense ID: ${id} ${deletedExp ? `(${deletedExp.desc})` : ""}`,
+        });
       },
 
       resetAll: async () => {
@@ -1334,7 +1469,7 @@ export const useMobileStore = create<MobilesState>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          const [salesRows, expRows, supRows, supPayRows, custRows, prodRows, purRows, accRows, warRows, setRows] = await Promise.all([
+          const [salesRows, expRows, supRows, supPayRows, custRows, prodRows, purRows, accRows, warRows, setRows, auditRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Mobiles_Sales"),
             readSheet(sheetsConfig.url, "Mobiles_Expenses"),
             readSheet(sheetsConfig.url, "Mobiles_Suppliers"),
@@ -1345,6 +1480,7 @@ export const useMobileStore = create<MobilesState>()(
             readSheet(sheetsConfig.url, "Mobiles_Accessories"),
             readSheet(sheetsConfig.url, "Mobiles_WarrantyClaims"),
             readSheet(sheetsConfig.url, "Mobiles_Settings"),
+            readSheet(sheetsConfig.url, "Mobiles_Audit"),
           ]);
           const localSalesById = new Map(get().sales.map((x) => [String(x?.id), x]));
           const sanitizedSales = salesRows.map((r: any) => {
@@ -1483,6 +1619,11 @@ export const useMobileStore = create<MobilesState>()(
                 invoicePrefix: String(savedSettings.invoicePrefix ?? st.settings.invoicePrefix),
               },
             }));
+          }
+
+          if (auditRows.length > 0) {
+            const sanitizedAudit = auditRows.map(auditFromRow);
+            set({ audit: sanitizedAudit });
           }
 
           // Products/purchases/sales were just replaced wholesale; the local

@@ -236,6 +236,7 @@ export type Notification = {
 };
 
 export type AuditEntry = {
+  id?: string;
   ts: string;
   user: string;
   action: string;
@@ -331,13 +332,21 @@ const today = () =>
 const fmtInr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
 // ---- EMI Calculation ----
-export function calcEmi(price: number, deposit: number, interestRate: number, noOfEmi: number, customFileCharge?: number) {
-  const fileCharge = customFileCharge !== undefined && !isNaN(customFileCharge) ? customFileCharge : Math.round(price * 0.1);
-  const balance = price - deposit;
-  const interestPerMonth = Math.round(balance * interestRate / 100);
-  const totalInterest = interestPerMonth * noOfEmi;
-  const totalEmiAmount = balance + totalInterest + fileCharge;
-  const perMonthEmi = noOfEmi > 0 ? Math.round(totalEmiAmount / noOfEmi) : 0;
+export function calcEmi(priceInput: number, depositInput: number, interestRateInput: number, noOfEmiInput: number, customFileCharge?: number) {
+  const price = Math.max(0, priceInput || 0);
+  const deposit = Math.max(0, depositInput || 0);
+  const interestRate = Math.max(0, interestRateInput || 0);
+  const noOfEmi = Math.max(0, noOfEmiInput || 0);
+  const fileCharge = customFileCharge !== undefined && !isNaN(customFileCharge)
+    ? Math.max(0, customFileCharge)
+    : Math.round(price * 0.1);
+
+  const balance = Math.max(0, price - deposit);
+  const interestPerMonth = Math.round((balance * interestRate) / 100);
+  const totalInterest = Math.max(0, interestPerMonth * noOfEmi);
+  const rawTotal = Math.max(0, balance + totalInterest + fileCharge);
+  const perMonthEmi = noOfEmi > 0 ? Math.round(rawTotal / noOfEmi) : 0;
+  const totalEmiAmount = noOfEmi > 0 ? perMonthEmi * noOfEmi : rawTotal;
   return { fileCharge, balance, interestPerMonth, totalInterest, totalEmiAmount, perMonthEmi };
 }
 
@@ -591,7 +600,7 @@ type State = {
   markAllNotificationsRead: () => void;
   markNotificationRead: (id: string) => void;
   pushNotification: (n: Omit<Notification, "id" | "time">) => void;
-  pushAudit: (e: Omit<AuditEntry, "ts">) => void;
+  pushAudit: (e: { action: string; target: string; user?: string; id?: string }) => void;
   resetSeed: () => Promise<void>;
   recheckStatuses: () => void;
   updateSheetsConfig: (cfg: Partial<SheetsConfig>) => void;
@@ -661,6 +670,30 @@ export function documentRow(d: AppDocument): SheetRow {
     type: d.type, fileName: d.fileName || "", fileSize: d.fileSize || "",
     date: d.date || "", status: d.status || "Pending",
     driveUrl: d.driveUrl || "",
+  };
+}
+
+export function auditRow(a: AuditEntry): SheetRow {
+  const tsId = String(a.ts || "").replace(/[^a-zA-Z0-9]/g, "_");
+  const actionId = String(a.action || "").replace(/[^a-zA-Z0-9]/g, "_");
+  const userId = String(a.user || "").replace(/[^a-zA-Z0-9]/g, "_");
+  const rowId = a.id || `AUD-F-${tsId}-${userId}-${actionId}`;
+  return {
+    id: rowId,
+    ts: a.ts,
+    user: a.user,
+    action: a.action,
+    target: a.target,
+  };
+}
+
+export function auditFromRow(r: SheetRow): AuditEntry {
+  return {
+    id: String(r.id ?? ""),
+    ts: String(r.ts ?? ""),
+    user: String(r.user ?? "System"),
+    action: String(r.action ?? "Action"),
+    target: String(r.target ?? "—"),
   };
 }
 export function paymentRow(p: Payment): SheetRow {
@@ -1582,10 +1615,13 @@ export const useStore = create<State>()(
         const newCollected = curCollected + amount;
         const totalAmountNum = parseAmount(loan.amount);
         const depositNum = parseAmount(loan.deposit);
+        const emiNum = parseAmount(loan.emi);
+        const durationMonths = parseInt(String(loan.duration ?? "").replace(/\D/g, ""), 10) || 0;
         const netLoanPrincipal = Math.max(0, totalAmountNum - depositNum);
+        const totalPayable = Math.max(netLoanPrincipal, emiNum > 0 && durationMonths > 0 ? Math.round(emiNum * durationMonths) : netLoanPrincipal);
 
         const newPaidEmis = (loan.paidEmis || 0) + 1;
-        const isFullyPaid = netLoanPrincipal > 0 && newCollected >= netLoanPrincipal;
+        const isFullyPaid = totalPayable > 0 && newCollected >= totalPayable;
 
         set((s) => ({
           loans: recalculateLoanStatuses(
@@ -1817,7 +1853,20 @@ export const useStore = create<State>()(
       markAllNotificationsRead: () => set((s) => ({ notifications: s.notifications.map((n) => ({ ...n, read: true })) })),
       markNotificationRead: (id) => set((s) => ({ notifications: s.notifications.map((n) => n.id === id ? { ...n, read: true } : n) })),
       pushNotification: (n) => set((s) => ({ notifications: [{ id: "N" + Date.now(), time: "just now", ...n }, ...s.notifications] })),
-      pushAudit: (e) => set((s) => ({ audit: [{ ts: new Date().toLocaleString("en-IN"), ...e }, ...s.audit] })),
+      pushAudit: (e) => {
+        const currentUser = get().currentUser;
+        const user = e.user || currentUser?.name || "Admin";
+        const ts = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        const entry: AuditEntry = {
+          id: e.id || `AUD-F-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          ts,
+          user,
+          action: e.action,
+          target: e.target,
+        };
+        set((s) => ({ audit: [entry, ...s.audit] }));
+        syncUpsert(get, "Finance_Audit", auditRow(entry), "finance audit log");
+      },
 
       resetSeed: async () => {
         // 1. Reset local state to empty (NOT seed data). The staff directory
@@ -1884,7 +1933,7 @@ export const useStore = create<State>()(
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
         try {
-          const [custRows, payRows, expRows, invRows, staffRows, loanRows, profitRows, docRows] = await Promise.all([
+          const [custRows, payRows, expRows, invRows, staffRows, loanRows, profitRows, docRows, auditRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Finance_Customers"),
             readSheet(sheetsConfig.url, "Finance_Payments"),
             readSheet(sheetsConfig.url, "Finance_Expenses"),
@@ -1893,6 +1942,7 @@ export const useStore = create<State>()(
             readSheet(sheetsConfig.url, "Finance_Loans"),
             readSheet(sheetsConfig.url, "Finance_ProfitTransactions"),
             readSheet(sheetsConfig.url, "Finance_Documents"),
+            readSheet(sheetsConfig.url, "Finance_Audit"),
           ]);
           // Customers: parse all numeric fields (always update state, even if empty array)
           const sanitizedCust = custRows.map((r: any) => ({
@@ -1986,6 +2036,11 @@ export const useStore = create<State>()(
           const sheetDocIds = new Set(mergedDocs.map((d) => d.id));
           for (const [id, d] of localDocs) if (!sheetDocIds.has(id)) mergedDocs.push(d as any);
           set({ documents: mergedDocs as unknown as AppDocument[] });
+
+          if (auditRows.length > 0) {
+            const sanitizedAudit = auditRows.map(auditFromRow);
+            set({ audit: sanitizedAudit });
+          }
 
           if (staffRows.length > 0) {
             const mappedStaff = staffRows
@@ -2315,6 +2370,18 @@ function triggerDownload(filename: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
+export type FlowMetrics = {
+  cashIn: number;
+  cashOut: number;
+  bankIn: number;
+  bankOut: number;
+  netCash: number;
+  netBank: number;
+  totalInflow: number;
+  totalOutflow: number;
+  netConsolidated: number;
+};
+
 export interface DownloadLedgerPDFOptions {
   title: string;
   companyName: string;
@@ -2322,6 +2389,19 @@ export interface DownloadLedgerPDFOptions {
   totalExpenses?: number;
   netBalance?: number;
   periodLabel?: string;
+  cards6?: {
+    cashIn: number;
+    bankIn: number;
+    totalOutflows: number;
+    netCash: number;
+    netBank: number;
+    netConsolidated: number;
+  };
+  reconciliationTable?: {
+    finance: FlowMetrics;
+    mobiles: FlowMetrics;
+    combined: FlowMetrics;
+  };
   entries: Array<{
     id: string;
     date: string;
@@ -2335,7 +2415,7 @@ export interface DownloadLedgerPDFOptions {
 }
 
 export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
-  const { title, companyName, totalIncome, totalExpenses, netBalance, periodLabel, entries } = options;
+  const { title, companyName, totalIncome, totalExpenses, netBalance, periodLabel, cards6, reconciliationTable, entries } = options;
 
   if (!entries || entries.length === 0) {
     toast.error("No entries available to export to PDF");
@@ -2373,17 +2453,17 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
 
       return `
         <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 10px 12px; font-weight: 600; color: #0f172a; white-space: nowrap;">${e.id}</td>
-          <td style="padding: 10px 12px; color: #475569; white-space: nowrap;">${e.date}</td>
-          <td style="padding: 10px 12px;">
-            <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; ${badgeStyle}">
+          <td style="padding: 8px 10px; font-weight: 600; color: #0f172a; white-space: nowrap;">${e.id}</td>
+          <td style="padding: 8px 10px; color: #475569; white-space: nowrap;">${e.date}</td>
+          <td style="padding: 8px 10px;">
+            <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; ${badgeStyle}">
               ${typeStr}
             </span>
           </td>
-          <td style="padding: 10px 12px; color: #475569;">${modeStr}</td>
-          <td style="padding: 10px 12px; font-weight: 500; color: #1e293b;">${e.cat || "-"}</td>
-          <td style="padding: 10px 12px; color: #475569; max-width: 240px; word-break: break-word;">${e.desc || "-"}</td>
-          <td style="padding: 10px 12px; text-align: right; font-weight: 700; color: ${isInc ? "#16a34a" : "#0f172a"}; white-space: nowrap;">
+          <td style="padding: 8px 10px; color: #475569;">${modeStr}</td>
+          <td style="padding: 8px 10px; font-weight: 500; color: #1e293b;">${e.cat || "-"}</td>
+          <td style="padding: 8px 10px; color: #475569; max-width: 240px; word-break: break-word;">${e.desc || "-"}</td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: ${isInc ? "#16a34a" : "#0f172a"}; white-space: nowrap;">
             ${isInc ? `+ ${amtStr}` : `- ${amtStr}`}
           </td>
         </tr>
@@ -2392,7 +2472,48 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
     .join("");
 
   let statsHtml = "";
-  if (totalIncome !== undefined || totalExpenses !== undefined || netBalance !== undefined) {
+  if (cards6) {
+    statsHtml = `
+      <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 20px;">
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #16a34a; border-radius: 8px; padding: 10px 12px;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Cash Inflow</div>
+          <div style="font-size: 13px; font-weight: 800; color: #0f172a; margin-top: 4px; word-break: break-all;">₹${(cards6.cashIn || 0).toLocaleString("en-IN")}</div>
+          <div style="font-size: 8px; color: #64748b; margin-top: 2px;">Total physical cash</div>
+        </div>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #0284c7; border-radius: 8px; padding: 10px 12px;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Bank Inflow (UPI)</div>
+          <div style="font-size: 13px; font-weight: 800; color: #0f172a; margin-top: 4px; word-break: break-all;">₹${(cards6.bankIn || 0).toLocaleString("en-IN")}</div>
+          <div style="font-size: 8px; color: #64748b; margin-top: 2px;">UPI/Bank deposits</div>
+        </div>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #dc2626; border-radius: 8px; padding: 10px 12px;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Total Outflows</div>
+          <div style="font-size: 13px; font-weight: 800; color: #dc2626; margin-top: 4px; word-break: break-all;">₹${(cards6.totalOutflows || 0).toLocaleString("en-IN")}</div>
+          <div style="font-size: 8px; color: #64748b; margin-top: 2px;">Cash + bank payouts</div>
+        </div>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #eab308; border-radius: 8px; padding: 10px 12px;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Net Cash Flow</div>
+          <div style="font-size: 13px; font-weight: 800; color: ${(cards6.netCash || 0) >= 0 ? '#16a34a' : '#dc2626'}; margin-top: 4px; word-break: break-all;">
+            ${(cards6.netCash || 0) >= 0 ? '+' : ''}₹${(cards6.netCash || 0).toLocaleString("en-IN")}
+          </div>
+          <div style="font-size: 8px; color: #64748b; margin-top: 2px;">Physical cash drawer</div>
+        </div>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #0284c7; border-radius: 8px; padding: 10px 12px;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Net Bank Flow</div>
+          <div style="font-size: 13px; font-weight: 800; color: ${(cards6.netBank || 0) >= 0 ? '#16a34a' : '#dc2626'}; margin-top: 4px; word-break: break-all;">
+            ${(cards6.netBank || 0) >= 0 ? '+' : ''}₹${(cards6.netBank || 0).toLocaleString("en-IN")}
+          </div>
+          <div style="font-size: 8px; color: #64748b; margin-top: 2px;">Bank ledger balance</div>
+        </div>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #0f172a; border-radius: 8px; padding: 10px 12px;">
+          <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Net Consolidated</div>
+          <div style="font-size: 13px; font-weight: 800; color: ${(cards6.netConsolidated || 0) >= 0 ? '#16a34a' : '#dc2626'}; margin-top: 4px; word-break: break-all;">
+            ${(cards6.netConsolidated || 0) >= 0 ? '+' : ''}₹${(cards6.netConsolidated || 0).toLocaleString("en-IN")}
+          </div>
+          <div style="font-size: 8px; color: #64748b; margin-top: 2px;">Grand total net flow</div>
+        </div>
+      </div>
+    `;
+  } else if (totalIncome !== undefined || totalExpenses !== undefined || netBalance !== undefined) {
     statsHtml = `
       <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;">
@@ -2413,6 +2534,98 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
     `;
   }
 
+  let reconciliationHtml = "";
+  if (reconciliationTable) {
+    const fin = reconciliationTable.finance;
+    const mob = reconciliationTable.mobiles;
+    const comb = reconciliationTable.combined;
+
+    reconciliationHtml = `
+      <div style="margin-bottom: 24px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #ffffff;">
+        <h3 style="margin: 0 0 4px 0; font-size: 12px; font-weight: 700; color: #0f172a;">Module-wise Flow Integration & Reconciliation</h3>
+        <p style="margin: 0 0 10px 0; font-size: 9px; color: #64748b;">Mathematical addition and audit checklist of Cash & Bank flows from Jain Finance and Jain Mobiles modules.</p>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 9.5px;">
+          <thead>
+            <tr style="background: #f8fafc; border-bottom: 1.5px solid #cbd5e1; text-align: left;">
+              <th style="padding: 6px 8px; font-weight: 700; color: #475569; width: 35%;">TRANSACTION FLOW METRIC</th>
+              <th style="padding: 6px 8px; font-weight: 700; color: #16a34a; width: 20%;">JAIN FINANCE</th>
+              <th style="padding: 6px 8px; font-weight: 700; color: #0284c7; width: 20%;">JAIN MOBILES</th>
+              <th style="padding: 6px 8px; font-weight: 700; color: #0f172a; width: 25%;">CONSOLIDATED SUM (ADDITION)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background: #f1f5f9;">
+              <td colspan="4" style="padding: 5px 8px; font-weight: 700; font-size: 8.5px; color: #334155; text-transform: uppercase;">INFLOWS (RECEIPTS)</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 5px 8px; color: #334155;">Cash Inflow</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${fin.cashIn.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${mob.cashIn.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 700; color: #16a34a;">₹${comb.cashIn.toLocaleString("en-IN")}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 5px 8px; color: #334155;">Bank Inflow (UPI)</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${fin.bankIn.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${mob.bankIn.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 700; color: #16a34a;">₹${comb.bankIn.toLocaleString("en-IN")}</td>
+            </tr>
+            <tr style="background: #dcfce7; font-weight: 700; border-bottom: 1px solid #bbf7d0;">
+              <td style="padding: 5px 8px; color: #14532d;">Total Inflow</td>
+              <td style="padding: 5px 8px; color: #14532d;">₹${fin.totalInflow.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; color: #14532d;">₹${mob.totalInflow.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; color: #15803d; font-weight: 800;">₹${comb.totalInflow.toLocaleString("en-IN")}</td>
+            </tr>
+
+            <tr style="background: #f1f5f9;">
+              <td colspan="4" style="padding: 5px 8px; font-weight: 700; font-size: 8.5px; color: #334155; text-transform: uppercase;">OUTFLOWS (PAYMENTS)</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 5px 8px; color: #334155;">Cash Outflow</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${fin.cashOut.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${mob.cashOut.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 700; color: #dc2626;">₹${comb.cashOut.toLocaleString("en-IN")}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 5px 8px; color: #334155;">Bank Outflow (UPI)</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${fin.bankOut.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 600;">₹${mob.bankOut.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 700; color: #dc2626;">₹${comb.bankOut.toLocaleString("en-IN")}</td>
+            </tr>
+            <tr style="background: #fee2e2; font-weight: 700; border-bottom: 1px solid #fca5a5;">
+              <td style="padding: 5px 8px; color: #7f1d1d;">Total Outflow</td>
+              <td style="padding: 5px 8px; color: #7f1d1d;">₹${fin.totalOutflow.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; color: #7f1d1d;">₹${mob.totalOutflow.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; color: #b91c1c; font-weight: 800;">₹${comb.totalOutflow.toLocaleString("en-IN")}</td>
+            </tr>
+
+            <tr style="background: #f1f5f9;">
+              <td colspan="4" style="padding: 5px 8px; font-weight: 700; font-size: 8.5px; color: #334155; text-transform: uppercase;">NET BALANCE FLOW (INFLOW - OUTFLOW)</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 5px 8px; color: #334155;">Net Cash Flow (Drawer)</td>
+              <td style="padding: 5px 8px; font-weight: 600;">${fin.netCash >= 0 ? '+' : ''}₹${fin.netCash.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 600;">${mob.netCash >= 0 ? '+' : ''}₹${mob.netCash.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 700; color: ${comb.netCash >= 0 ? '#16a34a' : '#dc2626'};">${comb.netCash >= 0 ? '+' : ''}₹${comb.netCash.toLocaleString("en-IN")}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 5px 8px; color: #334155;">Net Bank Flow (Account)</td>
+              <td style="padding: 5px 8px; font-weight: 600;">${fin.netBank >= 0 ? '+' : ''}₹${fin.netBank.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 600;">${mob.netBank >= 0 ? '+' : ''}₹${mob.netBank.toLocaleString("en-IN")}</td>
+              <td style="padding: 5px 8px; font-weight: 700; color: ${comb.netBank >= 0 ? '#16a34a' : '#dc2626'};">${comb.netBank >= 0 ? '+' : ''}₹${comb.netBank.toLocaleString("en-IN")}</td>
+            </tr>
+            <tr style="background: #e2e8f0; font-weight: 800; font-size: 10px;">
+              <td style="padding: 6px 8px; color: #0f172a;">NET CONSOLIDATED (GRAND TOTAL)</td>
+              <td style="padding: 6px 8px; color: #0f172a;">${fin.netConsolidated >= 0 ? '+' : ''}₹${fin.netConsolidated.toLocaleString("en-IN")}</td>
+              <td style="padding: 6px 8px; color: #0f172a;">${mob.netConsolidated >= 0 ? '+' : ''}₹${mob.netConsolidated.toLocaleString("en-IN")}</td>
+              <td style="padding: 6px 8px; color: ${comb.netConsolidated >= 0 ? '#16a34a' : '#dc2626'}; font-size: 11px;">${comb.netConsolidated >= 0 ? '+' : ''}₹${comb.netConsolidated.toLocaleString("en-IN")}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -2422,18 +2635,18 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
           * { box-sizing: border-box; }
-          body { font-family: 'Inter', sans-serif; padding: 32px; color: #0f172a; background: #ffffff; margin: 0; font-size: 12px; }
+          body { font-family: 'Inter', sans-serif; padding: 24px; color: #0f172a; background: #ffffff; margin: 0; font-size: 11px; }
           .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 20px; }
           .brand-title { font-size: 22px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; margin: 0; }
           .doc-subtitle { font-size: 13px; font-weight: 600; color: #475569; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
           .meta-info { text-align: right; font-size: 11px; color: #64748b; line-height: 1.5; }
           table { width: 100%; border-collapse: collapse; margin-top: 8px; text-align: left; }
-          th { padding: 10px 12px; border-bottom: 2px solid #cbd5e1; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; background-color: #f8fafc; letter-spacing: 0.5px; }
+          th { padding: 8px 10px; border-bottom: 2px solid #cbd5e1; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; background-color: #f8fafc; letter-spacing: 0.5px; }
           tr:nth-child(even) { background-color: #f8fafc; }
           .footer { margin-top: 32px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; }
           @media print {
             body { padding: 0; }
-            @page { size: A4 portrait; margin: 15mm; }
+            @page { size: A4 landscape; margin: 10mm; }
           }
         </style>
       </head>
@@ -2452,13 +2665,16 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
 
         ${statsHtml}
 
+        ${reconciliationHtml}
+
+        <h3 style="margin: 20px 0 8px 0; font-size: 12px; font-weight: 700; color: #0f172a;">Cash & Bank Flow Statement (Transactions Ledger)</h3>
         <table>
           <thead>
             <tr>
               <th style="width: 12%;">Reference</th>
               <th style="width: 12%;">Date</th>
               <th style="width: 10%;">Type</th>
-              <th style="width: 12%;">Mode</th>
+              <th style="width: 10%;">Mode</th>
               <th style="width: 18%;">Category</th>
               <th>Description</th>
               <th style="text-align: right; width: 14%;">Amount</th>
@@ -2470,7 +2686,7 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
         </table>
 
         <div class="footer">
-          ${companyName} · Confidential Expense & Income Ledger Report · Generated Automatically
+          ${companyName} · Confidential Cash & Bank Flow Statement & Reconciliation Report · Generated Automatically
         </div>
 
         <script>
@@ -2694,12 +2910,14 @@ export function recalculateLoanStatuses(loans: Loan[]): Loan[] {
 
   return (loans || []).filter(Boolean).map((l) => {
     const principal = Math.max(0, parseAmount(l.amount) - parseAmount(l.deposit));
+    const emiNum = parseAmount(l.emi);
+    const months = parseInt(String(l.duration ?? "").replace(/\D/g, ""), 10) || 0;
+    const totalPayable = Math.max(principal, emiNum > 0 && months > 0 ? Math.round(emiNum * months) : principal);
     const collected = Number(l.collectedAmount) || 0;
-    if (principal > 0 && collected >= principal) {
+    if (totalPayable > 0 && collected >= totalPayable) {
       return { ...l, status: "Completed" as const };
     }
 
-    const months = parseInt(String(l.duration ?? "").replace(/\D/g, ""), 10) || 0;
     const start = parseAppDate(l.date);
     if (!start || months <= 0) return { ...l, status: l.status === "Completed" ? "Active" : l.status };
 
