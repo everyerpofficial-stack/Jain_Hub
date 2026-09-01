@@ -29,13 +29,24 @@ export const SECURITY_HEADERS: Record<string, string> = {
   // Switch off browser APIs this app never uses.
   "Permissions-Policy":
     "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), interest-cohort=()",
-  "X-XSS-Protection": "1; mode=block",
-  // script-src needs 'unsafe-inline'/'unsafe-eval' for the SSR hydration
-  // payload; connect-src must allow Apps Script or the Google Sheets sync
-  // breaks; style/font-src cover the Google Fonts link in __root.tsx.
+  // Explicitly OFF. The legacy XSS auditor this enabled has been removed from
+  // every current browser, and where it still exists "1; mode=block" is a
+  // liability rather than a defence — it has its own known bypass and
+  // information-disclosure issues, and it can break a page by heuristically
+  // blocking legitimate script. The real protections here are the CSP below and
+  // escaping every value that reaches an HTML template (lib/utils escapeHtml).
+  "X-XSS-Protection": "0",
+  // script-src keeps 'unsafe-inline' for the SSR hydration payload TanStack
+  // Start writes into the document. 'unsafe-eval' is NOT included in a
+  // production build: nothing in the client bundle calls eval() or the Function
+  // constructor (verified against dist/client), so allowing it only widened the
+  // blast radius of any injection for no functional gain. Vite's dev server is
+  // a different story, so it stays on there.
+  // connect-src must allow Apps Script or the Google Sheets sync breaks;
+  // style/font-src cover the Google Fonts link in __root.tsx.
   "Content-Security-Policy": [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    `script-src 'self' 'unsafe-inline'${import.meta.env?.DEV ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: blob: https:",

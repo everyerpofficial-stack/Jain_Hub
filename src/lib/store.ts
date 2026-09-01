@@ -8,7 +8,7 @@ import XLSX from "xlsx-js-style";
 import { toast } from "sonner";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp, uploadFileToDrive, parseDataUrl } from "./googleSheets";
 import { enqueueWrite, markIdDeleted } from "./syncQueue";
-import { nextSeqId } from "./utils";
+import { nextSeqId, escapeHtml } from "./utils";
 
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -286,17 +286,81 @@ function generateSalt(): string {
   return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Hex-encode an ArrayBuffer / typed array of bytes. */
+function toHex(bytes: ArrayBuffer | Uint8Array): string {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return Array.from(view).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /**
- * Salted SHA-256 password hash. This is a client-only SPA with no server
- * to hold a secret, so this can't defend against a determined attacker who
- * reads the app's own source — but it DOES mean a leaked Google Sheet row
- * or a localStorage dump no longer hands over a directly-reusable plaintext
- * password, which is what these were stored as before.
+ * Work factor for new password hashes. Marked in the stored value so it can be
+ * raised later without invalidating existing hashes.
+ */
+const PBKDF2_ITERATIONS = 210_000;
+const PBKDF2_PREFIX = "pbkdf2$";
+
+/**
+ * Derive a password hash.
+ *
+ * Why PBKDF2 rather than the single SHA-256 pass this used to do: these hashes
+ * are stored in the Google Sheet, and that sheet is reachable by anyone holding
+ * the Web App URL. A salted single-round SHA-256 is a *fast* hash — a commodity
+ * GPU walks a few billion candidates a second, so the salt stops rainbow tables
+ * and nothing else, and the short numeric passwords this shop actually uses fall
+ * in well under a second. PBKDF2 with a real iteration count makes each guess
+ * cost something.
+ *
+ * This is still a client-only app with no server secret, so it cannot defend
+ * against someone who controls the browser. What it defends is the *stored*
+ * value: a leaked sheet row or localStorage dump no longer converts cheaply
+ * back into the password the operator probably reused elsewhere.
  */
 async function hashPassword(password: string, salt: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: new TextEncoder().encode(salt),
+      iterations: PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
+    key,
+    256
+  );
+  return `${PBKDF2_PREFIX}${PBKDF2_ITERATIONS}$${toHex(bits)}`;
+}
+
+/** The original single-round scheme, kept only to verify hashes written before. */
+async function legacyHashPassword(password: string, salt: string): Promise<string> {
   const bytes = new TextEncoder().encode(`${salt}:${password}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return toHex(await crypto.subtle.digest("SHA-256", bytes));
+}
+
+/**
+ * Check a password against a stored hash in either format.
+ *
+ * Returns `needsUpgrade` when the stored value is a legacy SHA-256 hash, so the
+ * caller can transparently re-write it as PBKDF2 — the same opportunistic
+ * migration already used to retire the plaintext passwords before it. Nobody is
+ * locked out by the change of scheme.
+ */
+async function verifyPassword(
+  password: string,
+  salt: string,
+  storedHash: string
+): Promise<{ ok: boolean; needsUpgrade: boolean }> {
+  if (storedHash.startsWith(PBKDF2_PREFIX)) {
+    const computed = await hashPassword(password, salt);
+    return { ok: computed === storedHash, needsUpgrade: false };
+  }
+  const legacy = await legacyHashPassword(password, salt);
+  return { ok: legacy === storedHash, needsUpgrade: legacy === storedHash };
 }
 
 // Legacy types (kept for backward compat)
@@ -478,21 +542,81 @@ const FAKE_AUDIT_TS = new Set([
   "25 Jul 2026, 10:00 AM", "24 Jul 2026, 03:45 PM",
 ]);
 
-// Built-in admin account initialized with default password "515158"
+/**
+ * Built-in admin row, so the owner is never locked out of an empty install.
+ *
+ * It deliberately carries NO password. It used to ship one in plain text
+ * ("515158"), and loginWithPassword had a second copy of the same literal as a
+ * fallback — meaning the admin credential for the live system was readable by
+ * anyone who opened the JavaScript bundle in devtools, and was committed to
+ * this repository besides. Password login for this account now works only
+ * through the row's own salted hash (set from Roles, stored on the sheet), or
+ * through the one-time bootstrap credential below.
+ */
 export const seedStaff: Staff[] = [
-  { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both", password: "515158" },
+  { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both" },
 ];
+
+/**
+ * First-run-only admin credential, supplied by the deployment rather than the
+ * source tree.
+ *
+ * Read honestly: a VITE_* variable is inlined into the client bundle at build
+ * time, so this is NOT a secret from anyone who downloads the app — it is a
+ * bootstrap that (a) keeps the owner able to sign in on a fresh install,
+ * (b) can be rotated without a code change, (c) is absent from the repository
+ * and from anyone's build who does not set it, and (d) becomes dead code the
+ * moment the admin row has a real salted hash, because the hash branch in
+ * loginWithPassword matches first. Set a real password in Roles, then clear
+ * VITE_ADMIN_BOOTSTRAP_PASSWORD and rebuild.
+ */
+const BOOTSTRAP_ADMIN_EMAIL = (
+  (import.meta.env.VITE_ADMIN_BOOTSTRAP_EMAIL as string) || "jainmobile7828@gmail.com"
+).trim().toLowerCase();
+const BOOTSTRAP_ADMIN_PASSWORD = ((import.meta.env.VITE_ADMIN_BOOTSTRAP_PASSWORD as string) || "").trim();
 
 
 // ── Login Rate Limiting ──────────────────────────────────────────────────────
-// Track failed login attempts in-memory (resets on page reload — intentional for UX)
-const loginFailures: Map<string, { count: number; lockedUntil: number }> = new Map();
+// Failed-attempt tracking, persisted so it survives a page reload.
+//
+// It used to live in a module-level Map, which meant F5 cleared the lockout —
+// the "locked for 5 minutes" message was true for exactly as long as the
+// attacker chose to leave the tab open, so it stopped nothing. Persisting it
+// makes the lockout real for an ordinary attacker at the keyboard.
+//
+// It is still a CLIENT-side control and someone who clears site data resets it.
+// The throttles that cannot be cleared from the browser live in Code.gs: five
+// OTP emails per address per five minutes, and five verification attempts
+// before the issued code is burned.
+const LOGIN_FAILURES_KEY = "jain-login-failures";
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+type LoginFailureEntry = { count: number; lockedUntil: number };
+
+function readLoginFailures(): Record<string, LoginFailureEntry> {
+  const raw = safeLocalStorage.getItem(LOGIN_FAILURES_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLoginFailures(all: Record<string, LoginFailureEntry>): void {
+  // Drop entries whose lockout has expired so this never grows without bound.
+  const now = Date.now();
+  for (const [k, v] of Object.entries(all)) {
+    if (v.count === 0 && v.lockedUntil <= now) delete all[k];
+  }
+  safeLocalStorage.setItem(LOGIN_FAILURES_KEY, JSON.stringify(all));
+}
+
 export function checkLoginRateLimit(email: string): { allowed: boolean; secondsLeft?: number } {
   const key = email.trim().toLowerCase();
-  const entry = loginFailures.get(key);
+  const entry = readLoginFailures()[key];
   if (!entry) return { allowed: true };
   if (entry.lockedUntil > Date.now()) {
     const secondsLeft = Math.ceil((entry.lockedUntil - Date.now()) / 1000);
@@ -503,17 +627,21 @@ export function checkLoginRateLimit(email: string): { allowed: boolean; secondsL
 
 export function recordLoginFailure(email: string): void {
   const key = email.trim().toLowerCase();
-  const entry = loginFailures.get(key) || { count: 0, lockedUntil: 0 };
+  const all = readLoginFailures();
+  const entry = all[key] || { count: 0, lockedUntil: 0 };
   entry.count += 1;
   if (entry.count >= MAX_LOGIN_ATTEMPTS) {
     entry.lockedUntil = Date.now() + LOCKOUT_MS;
     entry.count = 0;
   }
-  loginFailures.set(key, entry);
+  all[key] = entry;
+  writeLoginFailures(all);
 }
 
 export function clearLoginFailures(email: string): void {
-  loginFailures.delete(email.trim().toLowerCase());
+  const all = readLoginFailures();
+  delete all[email.trim().toLowerCase()];
+  writeLoginFailures(all);
 }
 
 /** Returns true if the staff member is allowed to access the given module path */
@@ -810,35 +938,57 @@ export const useStore = create<State>()(
           found = seedStaff[0];
         }
         if (!found) return false;
+        // Narrowed alias: `found` is reassigned below when a hash is upgraded,
+        // which would otherwise lose the "not undefined" narrowing inside the
+        // set() callbacks that follow.
+        const account: Staff = found;
 
-        if (found.passwordHash && found.passwordSalt) {
-          const computed = await hashPassword(cleanPass, found.passwordSalt);
-          if (computed !== found.passwordHash) return false;
-        } else if (found.password) {
+        if (account.passwordHash && account.passwordSalt) {
+          const { ok, needsUpgrade } = await verifyPassword(cleanPass, account.passwordSalt, account.passwordHash);
+          if (!ok) return false;
+          if (needsUpgrade) {
+            // Correct password, but stored under the old fast-hash scheme.
+            // Re-hash it now so the weak value stops sitting on the sheet.
+            const upgradedSalt = generateSalt();
+            const upgradedHash = await hashPassword(cleanPass, upgradedSalt);
+            const upgraded: Staff = { ...account, password: undefined, passwordHash: upgradedHash, passwordSalt: upgradedSalt };
+            set((st) => ({
+              staff: st.staff.map((m) => (m.id === account.id ? upgraded : m)),
+            }));
+            syncUpsert(get, "Finance_Staff", staffRow(upgraded), "staff password hash upgrade");
+            found = upgraded;
+          }
+        } else if (account.password) {
           // Legacy plaintext account from before hashing was added. Verify
           // directly, then opportunistically migrate it to a salted hash so
           // the plaintext never sits in the sheet/localStorage again.
-          if (found.password !== cleanPass) return false;
+          if (account.password !== cleanPass) return false;
           const passwordSalt = generateSalt();
           const passwordHash = await hashPassword(cleanPass, passwordSalt);
-          const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
+          const migrated: Staff = { ...account, password: undefined, passwordHash, passwordSalt };
           set((s) => ({
-            staff: s.staff.some((m) => m.id === found.id)
-              ? s.staff.map((m) => (m.id === found.id ? migrated : m))
+            staff: s.staff.some((m) => m.id === account.id)
+              ? s.staff.map((m) => (m.id === account.id ? migrated : m))
               : [...s.staff, migrated],
             currentUser: migrated,
           }));
           syncUpsert(get, "Finance_Staff", staffRow(migrated), "staff password migration");
           clearLoginFailures(cleanEmail);
           return true;
-        } else if (cleanEmail === "jainmobile7828@gmail.com" && cleanPass === "515158") {
-          // Built-in admin password verification
+        } else if (
+          BOOTSTRAP_ADMIN_PASSWORD &&
+          cleanEmail === BOOTSTRAP_ADMIN_EMAIL &&
+          cleanPass === BOOTSTRAP_ADMIN_PASSWORD
+        ) {
+          // Bootstrap credential (see BOOTSTRAP_ADMIN_PASSWORD). Immediately
+          // converted to a salted hash on the staff row, so this branch stops
+          // being reachable for this account after the first successful login.
           const passwordSalt = generateSalt();
           const passwordHash = await hashPassword(cleanPass, passwordSalt);
-          const migrated: Staff = { ...found, password: undefined, passwordHash, passwordSalt };
+          const migrated: Staff = { ...account, password: undefined, passwordHash, passwordSalt };
           set((s) => ({
-            staff: s.staff.some((m) => m.id === found.id)
-              ? s.staff.map((m) => (m.id === found.id ? migrated : m))
+            staff: s.staff.some((m) => m.id === account.id)
+              ? s.staff.map((m) => (m.id === account.id ? migrated : m))
               : [...s.staff, migrated],
             currentUser: migrated,
           }));
@@ -851,10 +1001,13 @@ export const useStore = create<State>()(
           return false;
         }
 
+        // `found` is the upgraded row when the hash was re-derived above, and
+        // the original otherwise.
+        const signedIn: Staff = found;
         clearLoginFailures(cleanEmail);
         set((s) => ({
-          staff: s.staff.some((m) => m.id === found.id) ? s.staff : [...s.staff, found],
-          currentUser: found,
+          staff: s.staff.some((m) => m.id === signedIn.id) ? s.staff : [...s.staff, signedIn],
+          currentUser: signedIn,
         }));
         return true;
       },
@@ -1296,15 +1449,10 @@ export const useStore = create<State>()(
         }
 
         // ── Inline HTML escaping to prevent XSS in invoice template ────────────────
-        const esc = (v: string | undefined | null): string => {
-          if (v === undefined || v === null || v === "") return "—";
-          return String(v)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-        };
+        // Same escaping as escapeHtml() in lib/utils, but renders a blank as an
+        // em dash, which is what this invoice layout wants in an empty field.
+        const esc = (v: unknown): string =>
+          v === undefined || v === null || v === "" ? "—" : escapeHtml(v);
 
         // Generate printable HTML invoice content
         const invoiceContent = `
@@ -1317,8 +1465,8 @@ export const useStore = create<State>()(
               </div>
               <div style="text-align: right;">
                 <h2 style="margin: 0; font-size: 16px; font-weight: 700; color: #3b82f6; letter-spacing: 0.05em; text-transform: uppercase;">Invoice Statement</h2>
-                <p style="margin: 6px 0 0 0; font-size: 13px; font-weight: 600; color: #0f172a;">Invoice ID: <strong>INV-${id}</strong></p>
-                <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Date: ${customer.billDate}</p>
+                <p style="margin: 6px 0 0 0; font-size: 13px; font-weight: 600; color: #0f172a;">Invoice ID: <strong>INV-${esc(id)}</strong></p>
+                <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Date: ${esc(customer.billDate)}</p>
               </div>
             </div>
 
@@ -1357,7 +1505,7 @@ export const useStore = create<State>()(
                   <td style="padding: 12px; text-align: right; font-weight: 500; color: #0f172a;">₹${customer.fileCharge.toLocaleString("en-IN")}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 12px; color: #334155;">Finance Interest (${customer.interestRate}% monthly interest rate for ${customer.noOfEmi} months)</td>
+                  <td style="padding: 12px; color: #334155;">Finance Interest (${esc(customer.interestRate)}% monthly interest rate for ${esc(customer.noOfEmi)} months)</td>
                   <td style="padding: 12px; text-align: right; font-weight: 500; color: #0f172a;">₹${customer.totalInterest.toLocaleString("en-IN")}</td>
                 </tr>
                 <tr style="border-bottom: 2px solid #e2e8f0; font-weight: 600; background: #f8fafc;">
@@ -1384,11 +1532,11 @@ export const useStore = create<State>()(
                 </div>
                 <div>
                   <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Repayment Duration</div>
-                  <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-top: 4px;">${customer.noOfEmi} Months</div>
+                  <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-top: 4px;">${esc(customer.noOfEmi)} Months</div>
                 </div>
                 <div>
                   <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">EMI Starting Date</div>
-                  <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-top: 4px;">${customer.emiDate}</div>
+                  <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-top: 4px;">${esc(customer.emiDate)}</div>
                 </div>
               </div>
             </div>
@@ -1972,7 +2120,17 @@ export const useStore = create<State>()(
             lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
             missedEmis: Number(r.missedEmis) || 0,
           }));
-          set({ customers: sanitizedCust as unknown as Customer[] });
+          // An empty read is NOT proof the table is empty. Code.gs answers a
+          // missing/renamed tab with {status:"ok", rows: []}, and a tab that has
+          // only its header row reads the same way — so an unconditional set()
+          // here wiped every customer on this device (and, once the poller
+          // re-uploaded, potentially on the sheet too). Only accept an empty
+          // sheet when this device has nothing to lose. Loans, profit, staff and
+          // audit below already guarded this way; customers/payments/expenses/
+          // investments did not.
+          if (custRows.length > 0 || get().customers.length === 0) {
+            set({ customers: sanitizedCust as unknown as Customer[] });
+          }
 
           // Payments: ensure customerId and status are present
           const sanitizedPay = payRows.map((r: any) => ({
@@ -1982,10 +2140,16 @@ export const useStore = create<State>()(
             cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
             bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
           }));
-          set({ payments: sanitizedPay as unknown as Payment[] });
+          if (payRows.length > 0 || get().payments.length === 0) {
+            set({ payments: sanitizedPay as unknown as Payment[] });
+          }
 
-          set({ expenses: expRows as unknown as Expense[] });
-          set({ investments: invRows as unknown as Investment[] });
+          if (expRows.length > 0 || get().expenses.length === 0) {
+            set({ expenses: expRows as unknown as Expense[] });
+          }
+          if (invRows.length > 0 || get().investments.length === 0) {
+            set({ investments: invRows as unknown as Investment[] });
+          }
 
           const sanitizedLoans = loanRows.map((r: any) => ({
             ...r,
@@ -2453,16 +2617,16 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
 
       return `
         <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 10px; font-weight: 600; color: #0f172a; white-space: nowrap;">${e.id}</td>
-          <td style="padding: 8px 10px; color: #475569; white-space: nowrap;">${e.date}</td>
+          <td style="padding: 8px 10px; font-weight: 600; color: #0f172a; white-space: nowrap;">${escapeHtml(e.id)}</td>
+          <td style="padding: 8px 10px; color: #475569; white-space: nowrap;">${escapeHtml(e.date)}</td>
           <td style="padding: 8px 10px;">
             <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; ${badgeStyle}">
-              ${typeStr}
+              ${escapeHtml(typeStr)}
             </span>
           </td>
-          <td style="padding: 8px 10px; color: #475569;">${modeStr}</td>
-          <td style="padding: 8px 10px; font-weight: 500; color: #1e293b;">${e.cat || "-"}</td>
-          <td style="padding: 8px 10px; color: #475569; max-width: 240px; word-break: break-word;">${e.desc || "-"}</td>
+          <td style="padding: 8px 10px; color: #475569;">${escapeHtml(modeStr)}</td>
+          <td style="padding: 8px 10px; font-weight: 500; color: #1e293b;">${escapeHtml(e.cat || "-")}</td>
+          <td style="padding: 8px 10px; color: #475569; max-width: 240px; word-break: break-word;">${escapeHtml(e.desc || "-")}</td>
           <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: ${isInc ? "#16a34a" : "#0f172a"}; white-space: nowrap;">
             ${isInc ? `+ ${amtStr}` : `- ${amtStr}`}
           </td>
@@ -2631,7 +2795,7 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>${title} - ${companyName}</title>
+        <title>${escapeHtml(title)} - ${escapeHtml(companyName)}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
           * { box-sizing: border-box; }
@@ -2653,12 +2817,12 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
       <body>
         <div class="header">
           <div>
-            <h1 class="brand-title">${companyName}</h1>
-            <div class="doc-subtitle">${title}</div>
+            <h1 class="brand-title">${escapeHtml(companyName)}</h1>
+            <div class="doc-subtitle">${escapeHtml(title)}</div>
           </div>
           <div class="meta-info">
             <div><strong>Generated:</strong> ${dateStr} ${timeStr}</div>
-            ${periodLabel ? `<div><strong>Date Scope:</strong> ${periodLabel}</div>` : ""}
+            ${periodLabel ? `<div><strong>Date Scope:</strong> ${escapeHtml(periodLabel)}</div>` : ""}
             <div><strong>Total Entries:</strong> ${entries.length}</div>
           </div>
         </div>
@@ -2686,7 +2850,7 @@ export function downloadLedgerPDF(options: DownloadLedgerPDFOptions) {
         </table>
 
         <div class="footer">
-          ${companyName} · Confidential Cash & Bank Flow Statement & Reconciliation Report · Generated Automatically
+          ${escapeHtml(companyName)} · Confidential Cash & Bank Flow Statement & Reconciliation Report · Generated Automatically
         </div>
 
         <script>

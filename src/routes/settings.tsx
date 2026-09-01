@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { MessageCircle, Globe, Database, Download, Upload, CheckCircle2, XCircle, Loader2, Trash2, Users, CreditCard, TrendingUp, Package, ShoppingCart, BarChart2, Truck, AlertTriangle, Wifi } from "lucide-react";
+import { MessageCircle, Globe, Database, Download, Upload, CheckCircle2, XCircle, Loader2, Trash2, Users, CreditCard, TrendingUp, Package, ShoppingCart, BarChart2, Truck, AlertTriangle, Wifi, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Card, SectionHeader } from "@/components/ui-kit";
 import { useStore } from "@/lib/store";
 import { useMobileStore } from "@/lib/mobileStore";
-import { pingScript } from "@/lib/googleSheets";
+import { pingScript, isSheetsApiKeyConfigured } from "@/lib/googleSheets";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -306,6 +306,29 @@ function SettingsPage() {
                     <p className="text-[10px] text-muted-foreground mt-1">This database URL is permanently built into the app — it works automatically on all devices without any setup.</p>
                   </div>
                 </div>
+
+                {/* The Web App URL ships inside the public JS bundle, and the
+                    deployment is "Who has access: Anyone" — so without the shared
+                    key, anyone who reads the bundle can read, overwrite or delete
+                    every row of the business's data. Say so where an admin will
+                    actually see it rather than only in a .env comment. */}
+                {isAdmin && !isSheetsApiKeyConfigured() && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-danger/5 border border-danger/30 text-xs">
+                    <ShieldAlert className="size-4 text-danger shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-danger text-sm">Database is not key-protected</div>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        No shared key is being sent with data requests. The Web App URL above is
+                        readable in this app's JavaScript, so anyone who finds it can read,
+                        overwrite or delete every record.
+                      </p>
+                      <ol className="text-[11px] text-muted-foreground mt-1.5 list-decimal ml-4 space-y-0.5">
+                        <li>In Apps Script: <strong>Project Settings → Script Properties</strong>, add <code className="font-mono">API_KEY</code> with a long random value.</li>
+                        <li>Put the same value in <code className="font-mono">VITE_SHEETS_API_KEY</code> (in <code className="font-mono">.env</code> and in the host's environment variables), then rebuild and redeploy.</li>
+                      </ol>
+                    </div>
+                  </div>
+                )}
 
                 {/* Action Buttons — admin only */}
                 {isAdmin && (

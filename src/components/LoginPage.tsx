@@ -20,7 +20,79 @@ import { checkLoginRateLimit, recordLoginFailure, clearLoginFailures, seedStaff 
 import { readSheet } from "@/lib/googleSheets";
 import type { Staff } from "@/lib/store";
 
-const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes — matches Code.gs
+
+/**
+ * Ask the Apps Script to issue a verification code.
+ *
+ * The code is generated and stored server-side; nothing about it comes back in
+ * this response. Previously the browser invented the code, passed it to the
+ * mailer as ?otp=, and then compared the typed value against its own copy —
+ * which meant the code was known to whoever was sitting at the browser before
+ * the email had even been sent, so reading the inbox was never actually
+ * required to sign in.
+ *
+ * Returns "server" when the deployment supports server-issued codes,
+ * "legacy" when it is still running the pre-fix Code.gs, or "failed".
+ */
+async function requestOtp(url: string, email: string): Promise<"server" | "legacy" | "failed"> {
+  try {
+    const response = await fetch(
+      `${url}?action=sendOtp&email=${encodeURIComponent(email)}`,
+      { method: "GET", redirect: "follow" }
+    );
+    if (!response.ok) return "failed";
+    const result = await response.json();
+    if (result.status === "ok" && result.issued) return "server";
+    // The old deployment rejects a sendOtp with no ?otp= parameter. Detect that
+    // exact answer rather than treating every error as "old script", so a real
+    // failure (deactivated staff, rate limit) is still reported as a failure.
+    if (typeof result.error === "string" && /missing email or otp/i.test(result.error)) {
+      return "legacy";
+    }
+    console.warn("[Login] OTP request refused:", result.error);
+    return "failed";
+  } catch (err) {
+    console.error("[Login] Failed to request OTP:", err);
+    return "failed";
+  }
+}
+
+/** Send a legacy client-generated code through the old sendOtp signature. */
+async function sendLegacyOtp(url: string, email: string, code: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `${url}?action=sendOtp&email=${encodeURIComponent(email)}&otp=${encodeURIComponent(code)}&system=${encodeURIComponent("Jain Finance & Mobiles Hub")}`,
+      { method: "GET", redirect: "follow" }
+    );
+    if (!response.ok) return false;
+    const result = await response.json();
+    return result.status === "ok";
+  } catch (err) {
+    console.error("[Login] Failed to send legacy OTP:", err);
+    return false;
+  }
+}
+
+/** Ask the Apps Script whether this code is the one it issued. */
+async function verifyOtpWithServer(
+  url: string,
+  email: string,
+  otp: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const response = await fetch(
+      `${url}?action=verifyOtp&email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`,
+      { method: "GET", redirect: "follow" }
+    );
+    if (!response.ok) return { ok: false, error: `Verification failed (HTTP ${response.status})` };
+    const result = await response.json();
+    if (result.status === "ok" && result.verified) return { ok: true };
+    return { ok: false, error: String(result.error || "Incorrect code") };
+  } catch (err) {
+    return { ok: false, error: (err as Error)?.message || "Could not reach the verification service" };
+  }
+}
 
 /**
  * Fast staff-only refresh from Google Sheets.
@@ -59,16 +131,6 @@ async function refreshStaffFromSheets(): Promise<Staff[]> {
   return [];
 }
 
-/** Escape special HTML characters to prevent XSS in any dynamic HTML */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 export function LoginPage() {
   const login = useStore((s) => s.login);
   const loginWithPassword = useStore((s) => s.loginWithPassword);
@@ -81,8 +143,12 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(0);
 
-  // OTP is stored in a ref (not state) so it's NOT visible in React DevTools
+  // Only ever populated on the legacy path (a deployment still running the
+  // pre-fix Code.gs). When the server issues the code, the browser never holds
+  // it at all. A ref rather than state so it is not visible in React DevTools.
   const sentOtpRef = useRef<string>("");
+  /** True when the deployed Apps Script issued this code and will verify it. */
+  const serverIssuedRef = useRef<boolean>(false);
   const otpExpiryRef = useRef<number>(0);
   const [otpExpired, setOtpExpired] = useState(false);
 
@@ -198,31 +264,49 @@ export function LoginPage() {
       return;
     }
 
-    // Generate OTP using crypto API and store in ref
-    const code = generateOtp();
-    sentOtpRef.current = code;
+    if (!sheetsUrl) {
+      toast.error("Cannot send a verification code", {
+        description:
+          "The Google Sheets backend is not configured on this build, so no code can be issued or checked.",
+        duration: 12000,
+      });
+      setLoading(false);
+      return;
+    }
+
+    // Ask the server for a code. serverIssuedRef records whether the deployed
+    // Apps Script actually took ownership of the code, because that decides
+    // which check runs on submit: the server's, or the legacy local one.
+    const mode = await requestOtp(sheetsUrl, cleanEmail);
+
+    if (mode === "failed") {
+      toast.error("Could not send a verification code", {
+        description:
+          "The email could not be issued. Check that this address is an Active staff member, then try again in a few minutes.",
+        duration: 12000,
+      });
+      setLoading(false);
+      return;
+    }
+
+    serverIssuedRef.current = mode === "server";
+    sentOtpRef.current = "";
     otpExpiryRef.current = Date.now() + OTP_EXPIRY_MS;
     setOtpExpired(false);
 
-    // Try sending email via Apps Script
-    let emailSent = false;
-
-    if (sheetsUrl) {
-      try {
-        const response = await fetch(
-          `${sheetsUrl}?action=sendOtp&email=${encodeURIComponent(cleanEmail)}&otp=${code}&system=${encodeURIComponent("Jain Finance & Mobiles Hub")}`,
-          { method: "GET", redirect: "follow" }
-        );
-        if (response.ok) {
-          const result = await response.json();
-          if (result.status === "ok") {
-            emailSent = true;
-          } else {
-            console.warn("Apps Script OTP send warning:", result.error);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to send OTP via Apps Script:", err);
+    if (mode === "legacy") {
+      // The deployed Code.gs predates server-issued codes. Keep the shop
+      // working, but this path cannot actually prove the user read the email —
+      // re-deploy google-apps-script/Code.gs to close it.
+      console.warn(
+        "[Login] The deployed Apps Script still expects a browser-generated OTP. " +
+          "Re-deploy google-apps-script/Code.gs so codes are issued and verified server-side."
+      );
+      const code = generateOtp();
+      sentOtpRef.current = code;
+      const sent = await sendLegacyOtp(sheetsUrl, cleanEmail, code);
+      if (!sent && import.meta.env.DEV) {
+        console.info("[DEV ONLY] OTP:", code);
       }
     }
 
@@ -230,76 +314,62 @@ export function LoginPage() {
     setLoading(false);
     setTimer(30);
 
-    if (emailSent) {
-      toast.success(`OTP code sent to ${escapeHtml(cleanEmail)}`, {
-        description: `We've sent a 6-digit code to your email. It expires in 5 minutes.`,
-        duration: 12000,
-      });
-    } else {
-      toast.info(`OTP fallback — no mail server configured`, {
-        description: `Check your registered email or contact admin. (Dev: check console)`,
-        duration: 15000,
-      });
-      if (import.meta.env.DEV) {
-        console.info("[DEV ONLY] OTP:", code);
-      }
-    }
+    toast.success(`OTP code sent to ${cleanEmail}`, {
+      description: "We've sent a 6-digit code to your email. It expires in 10 minutes.",
+      duration: 12000,
+    });
   };
 
   // Resend code
   const handleResend = async () => {
     if (timer > 0) return;
-    const rateCheck = checkLoginRateLimit(email.trim().toLowerCase());
+    const cleanEmail = email.trim().toLowerCase();
+    const rateCheck = checkLoginRateLimit(cleanEmail);
     if (!rateCheck.allowed) {
       const mins = Math.ceil((rateCheck.secondsLeft ?? 0) / 60);
       toast.error(`Too many attempts. Try again in ${mins} minute(s).`);
       return;
     }
 
-    const code = generateOtp();
-    sentOtpRef.current = code;
-    otpExpiryRef.current = Date.now() + OTP_EXPIRY_MS;
-    setOtpExpired(false);
-    setTimer(30);
-
     const activeUrl = useStore.getState().sheetsConfig.url || useMobileStore.getState().sheetsConfig.url || "";
-    let emailSent = false;
-
-    if (activeUrl) {
-      try {
-        const response = await fetch(
-          `${activeUrl}?action=sendOtp&email=${encodeURIComponent(email.trim())}&otp=${code}&system=${encodeURIComponent("Jain Finance & Mobiles Hub")}`,
-          { method: "GET", redirect: "follow" }
-        );
-        if (response.ok) {
-          const result = await response.json();
-          if (result.status === "ok") {
-            emailSent = true;
-          }
-        }
-      } catch (err) {
-        console.error("Failed to resend OTP via Apps Script:", err);
-      }
+    if (!activeUrl) {
+      toast.error("The Google Sheets backend is not configured on this build");
+      return;
     }
 
-    if (emailSent) {
-      toast.success("New OTP code sent to your email", {
-        description: `Please check your inbox. Expires in 5 minutes.`,
+    setTimer(30);
+    const mode = await requestOtp(activeUrl, cleanEmail);
+
+    if (mode === "failed") {
+      toast.error("Could not resend the verification code", {
+        description: "Try again in a few minutes, or contact your administrator.",
         duration: 12000,
       });
-    } else {
-      toast.info("OTP resent (fallback)", {
-        description: "Check your email or contact admin.",
-        duration: 15000,
-      });
-      if (import.meta.env.DEV) {
+      return;
+    }
+
+    serverIssuedRef.current = mode === "server";
+    sentOtpRef.current = "";
+    otpExpiryRef.current = Date.now() + OTP_EXPIRY_MS;
+    setOtpExpired(false);
+
+    if (mode === "legacy") {
+      const code = generateOtp();
+      sentOtpRef.current = code;
+      const sent = await sendLegacyOtp(activeUrl, cleanEmail, code);
+      if (!sent && import.meta.env.DEV) {
         console.info("[DEV ONLY] Resent OTP:", code);
       }
     }
+
+    toast.success("New OTP code sent to your email", {
+      description: "Please check your inbox. It expires in 10 minutes.",
+      duration: 12000,
+    });
   };
 
   // Verify code and log in
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (otpExpired || Date.now() > otpExpiryRef.current) {
@@ -325,40 +395,53 @@ export function LoginPage() {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      if (otpVal === sentOtpRef.current) {
-        sentOtpRef.current = "";
-        otpExpiryRef.current = 0;
-        clearLoginFailures(cleanEmail);
 
-        const success = login(cleanEmail);
-        if (success) {
-          toast.success("Signed in successfully", {
-            description: "Welcome to the Jain Finance & Mobiles Hub",
-          });
-        } else {
-          toast.error("Access Denied", {
-            description: "This email is not registered as an active staff member.",
-          });
-          setStep("email");
-          setOtpVal("");
-        }
+    // The server holds the code and does the comparison. The browser never sees
+    // it, so a correct answer here means the mailbox was actually read.
+    let verified = false;
+    let failureReason = "The verification code is incorrect. Please try again.";
+
+    if (serverIssuedRef.current) {
+      const activeUrl = useStore.getState().sheetsConfig.url || useMobileStore.getState().sheetsConfig.url || "";
+      const result = await verifyOtpWithServer(activeUrl, cleanEmail, otpVal);
+      verified = result.ok;
+      if (!verified && result.error) failureReason = result.error;
+    } else {
+      // Legacy deployment only — see the note in handleSendOtp.
+      verified = !!sentOtpRef.current && otpVal === sentOtpRef.current;
+    }
+
+    if (verified) {
+      sentOtpRef.current = "";
+      otpExpiryRef.current = 0;
+      serverIssuedRef.current = false;
+      clearLoginFailures(cleanEmail);
+
+      const success = login(cleanEmail);
+      if (success) {
+        toast.success("Signed in successfully", {
+          description: "Welcome to the Jain Finance & Mobiles Hub",
+        });
       } else {
-        recordLoginFailure(cleanEmail);
-        const after = checkLoginRateLimit(cleanEmail);
-        if (!after.allowed) {
-          toast.error("Too many failed attempts. Account locked for 5 minutes.");
-          setStep("email");
-          setOtpVal("");
-        } else {
-          toast.error("Invalid Code", {
-            description: "The verification code is incorrect. Please try again.",
-          });
-          setOtpVal("");
-        }
+        toast.error("Access Denied", {
+          description: "This email is not registered as an active staff member.",
+        });
+        setStep("email");
+        setOtpVal("");
       }
-      setLoading(false);
-    }, 200);
+    } else {
+      recordLoginFailure(cleanEmail);
+      const after = checkLoginRateLimit(cleanEmail);
+      if (!after.allowed) {
+        toast.error("Too many failed attempts. Account locked for 5 minutes.");
+        setStep("email");
+        setOtpVal("");
+      } else {
+        toast.error("Invalid Code", { description: failureReason });
+        setOtpVal("");
+      }
+    }
+    setLoading(false);
   };
 
   return (
@@ -544,7 +627,7 @@ export function LoginPage() {
                   autoComplete="one-time-code"
                 />
               </div>
-              <p className="text-[11px] text-[#71717a] text-right">Code expires in 5 minutes</p>
+              <p className="text-[11px] text-[#71717a] text-right">Code expires in 10 minutes</p>
             </div>
 
             <div className="flex items-center justify-between text-xs text-[#a1a1aa] pt-1">
@@ -554,6 +637,7 @@ export function LoginPage() {
                   setStep("email");
                   setOtpVal("");
                   sentOtpRef.current = "";
+                  serverIssuedRef.current = false;
                 }}
                 className="inline-flex items-center gap-1 hover:text-[#d4af37] transition-colors"
               >

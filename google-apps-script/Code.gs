@@ -36,10 +36,15 @@
  *
  *  API (all GET):
  *   ?action=ping                                  → health check
- *   ?action=sendOtp&email=X&otp=Y&system=Z        → send OTP via Gmail
- *                                                    (email must belong to
- *                                                    an Active Finance_Staff
- *                                                    row — otherwise rejected)
+ *   ?action=sendOtp&email=X                       → generate a 6-digit code
+ *                                                    HERE, mail it, and keep a
+ *                                                    salted hash of it for 10
+ *                                                    minutes. The code is never
+ *                                                    accepted from the caller.
+ *                                                    (email must belong to an
+ *                                                    Active Finance_Staff row)
+ *   ?action=verifyOtp&email=X&otp=Y               → check a code issued above;
+ *                                                    one-shot, 5 attempts max
  *   ?action=read&sheet=<name>&key=<API_KEY>                     → read all rows
  *   ?action=write&sheet=<name>&payload=<b64json>&key=<API_KEY>  → clear + write rows
  *   ?action=append&sheet=<name>&payload=<b64json>&key=<API_KEY> → append rows
@@ -184,18 +189,20 @@ function doGet(e) {
 
     // ── 3. Send OTP via Gmail ──────────────────────────────────────────
 
+    // The OTP is generated HERE and never travels from the browser to this
+    // endpoint. It used to: the client made up its own 6-digit code, passed it
+    // in as ?otp=, and then compared the user's input against that same code in
+    // JavaScript. That is not authentication — whoever drives the browser
+    // already knows the answer before the email is sent, so anyone who knew a
+    // staff email address could sign in without ever reading the inbox. Issuing
+    // the code server-side and checking it server-side (see "verifyOtp" below)
+    // is what makes possession of the mailbox actually matter.
     if (action === "sendOtp") {
       var email      = (e.parameter.email  || "").trim().toLowerCase();
-      var otp        = (e.parameter.otp    || "").trim();
       var systemName = "Jain Finance & Mobiles Hub"; // fixed — never taken from the request
 
-      if (!email || !otp) {
-        return jsonResponse({ status: "error", error: "Missing email or otp parameter" });
-      }
-      // Otp must be exactly 6 digits — rejects anything crafted to inject
-      // markup/script into the email body via this parameter.
-      if (!/^\d{6}$/.test(otp)) {
-        return jsonResponse({ status: "error", error: "Invalid otp format" });
+      if (!email) {
+        return jsonResponse({ status: "error", error: "Missing email parameter" });
       }
       // Without this check, this endpoint is an open mail relay: anyone who
       // finds the Web App URL (it ships in the public JS bundle) could make
@@ -216,16 +223,71 @@ function doGet(e) {
       }
       cache.put(rlKey, String(count + 1), 300); // 5 minutes
 
+      var otp = generateServerOtp_();
+      // Stored as a salted hash, not as the code itself, so a cache dump does
+      // not hand over live codes. Ten minutes matches the email copy.
+      var otpSalt = Utilities.getUuid();
+      cache.put(OTP_KEY_PREFIX + email, otpSalt + ":" + hashOtp_(otp, otpSalt), 600);
+      cache.remove(OTP_ATTEMPT_PREFIX + email);
+
       try {
         MailApp.sendEmail({
           to:       email,
           subject:  "[" + systemName + "] Your Verification Code: " + otp,
           htmlBody: buildOtpEmailHtml(otp, systemName),
         });
-        return jsonResponse({ status: "ok", message: "OTP sent to " + email });
+        return jsonResponse({ status: "ok", issued: true, message: "OTP sent to " + email });
       } catch (mailErr) {
+        cache.remove(OTP_KEY_PREFIX + email);
         return jsonResponse({ status: "error", error: "Email send failed: " + mailErr.toString() });
       }
+    }
+
+    // ── 3b. Verify an OTP issued by sendOtp above ──────────────────────
+    // One-shot: a correct code is consumed immediately, and five wrong
+    // guesses burn the code so it cannot be brute-forced (a 6-digit space
+    // is only a million wide, and this endpoint is reachable by anyone).
+    if (action === "verifyOtp") {
+      var vEmail = (e.parameter.email || "").trim().toLowerCase();
+      var vOtp   = (e.parameter.otp   || "").trim();
+      if (!vEmail || !vOtp) {
+        return jsonResponse({ status: "error", error: "Missing email or otp parameter" });
+      }
+      if (!/^\d{6}$/.test(vOtp)) {
+        return jsonResponse({ status: "error", error: "Invalid code" });
+      }
+
+      var vCache  = CacheService.getScriptCache();
+      var stored  = vCache.get(OTP_KEY_PREFIX + vEmail);
+      if (!stored) {
+        return jsonResponse({ status: "error", error: "This code has expired — request a new one" });
+      }
+
+      var attemptKey = OTP_ATTEMPT_PREFIX + vEmail;
+      var attempts   = parseInt(vCache.get(attemptKey) || "0", 10);
+      if (attempts >= 5) {
+        vCache.remove(OTP_KEY_PREFIX + vEmail);
+        vCache.remove(attemptKey);
+        return jsonResponse({ status: "error", error: "Too many incorrect attempts — request a new code" });
+      }
+
+      var sep = stored.indexOf(":");
+      var storedSalt = stored.substring(0, sep);
+      var storedHash = stored.substring(sep + 1);
+      if (!constantTimeEquals_(hashOtp_(vOtp, storedSalt), storedHash)) {
+        vCache.put(attemptKey, String(attempts + 1), 600);
+        return jsonResponse({ status: "error", error: "Incorrect code" });
+      }
+
+      // Correct — consume it so the same code can never be replayed, and
+      // re-check the staff row in case the account was deactivated between
+      // the code being sent and being used.
+      vCache.remove(OTP_KEY_PREFIX + vEmail);
+      vCache.remove(attemptKey);
+      if (!isActiveStaffEmail(vEmail)) {
+        return jsonResponse({ status: "error", error: "Email is not a registered active staff member" });
+      }
+      return jsonResponse({ status: "ok", verified: true });
     }
 
     // ── 3. Read all rows from a sheet ─────────────────────────────────
@@ -542,7 +604,18 @@ function isActiveStaffEmail(emailLower) {
   try {
     var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName("Finance_Staff");
-    if (!sheet || sheet.getLastRow() < 2) return false;
+    // First run: the staff tab does not exist yet (or holds only its header),
+    // so no email can be matched and OTP login is impossible for everyone —
+    // including the owner who needs to sign in to create the first staff row.
+    // Set a BOOTSTRAP_ADMIN_EMAIL Script Property to name the one address that
+    // may sign in while the directory is empty. It stops mattering the moment
+    // a real staff row exists.
+    if (!sheet || sheet.getLastRow() < 2) {
+      var bootstrap = String(
+        PropertiesService.getScriptProperties().getProperty("BOOTSTRAP_ADMIN_EMAIL") || ""
+      ).trim().toLowerCase();
+      return !!bootstrap && bootstrap === emailLower;
+    }
 
     var data    = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
     var headers = data[0];
@@ -559,6 +632,45 @@ function isActiveStaffEmail(emailLower) {
   } catch (err) {
     return false;
   }
+}
+
+// ── OTP storage helpers ───────────────────────────────────────────
+// A code lives only in the script cache, only as a salted hash, and only for
+// ten minutes. Nothing about it is written to the spreadsheet.
+var OTP_KEY_PREFIX     = "otp_code_";
+var OTP_ATTEMPT_PREFIX = "otp_try_";
+
+/** Cryptographically-seeded 6-digit code. */
+function generateServerOtp_() {
+  // getUuid() is seeded from the platform's secure random source; folding it
+  // into a number gives a code that is not predictable from the clock the way
+  // a Math.random() one is.
+  var raw = Utilities.getUuid().replace(/[^0-9a-f]/g, "").substring(0, 12);
+  var n = 0;
+  for (var i = 0; i < raw.length; i++) n = (n * 16 + parseInt(raw.charAt(i), 16)) % 900000;
+  return String(100000 + n);
+}
+
+function hashOtp_(otp, salt) {
+  var bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    salt + ":" + otp,
+    Utilities.Charset.UTF_8
+  );
+  var hex = "";
+  for (var i = 0; i < bytes.length; i++) {
+    var b = (bytes[i] + 256) % 256;
+    hex += (b < 16 ? "0" : "") + b.toString(16);
+  }
+  return hex;
+}
+
+/** Compare without an early exit, so response time carries no information. */
+function constantTimeEquals_(a, b) {
+  if (a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 // ── Helper: Build OTP email HTML ──────────────────────────────────────────────

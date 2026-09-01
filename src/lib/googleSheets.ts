@@ -61,7 +61,19 @@ const CHUNK_BYTES = 40_000;
  * then Code.gs runs with no key requirement, matching prior behavior.
  */
 function getApiKey(): string {
-  return (import.meta.env.VITE_SHEETS_API_KEY as string) || "";
+  return ((import.meta.env.VITE_SHEETS_API_KEY as string) || "").trim();
+}
+
+/**
+ * Whether this build sends a shared key with its data requests.
+ *
+ * Surfaced in the UI (Settings → Google Sheets) because the alternative is an
+ * unauthenticated database: the Web App URL is inlined into the public bundle
+ * and the deployment answers "Anyone", so with no key every row is readable and
+ * writable by whoever finds it. That is worth a banner, not a comment in .env.
+ */
+export function isSheetsApiKeyConfigured(): boolean {
+  return getApiKey().length > 0;
 }
 
 /**

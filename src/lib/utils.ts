@@ -20,3 +20,28 @@ export function nextSeqId(prefix: string, existingIds: string[]): string {
   }, 0);
   return prefix + (max + 1).toString().padStart(3, "0");
 }
+
+/**
+ * Escape a value for interpolation into an HTML string.
+ *
+ * Every "print" / "download PDF" path in this app builds an HTML document by
+ * template literal and hands it to `document.write()` on a `window.open("")`
+ * popup — which is a SAME-ORIGIN document. Anything interpolated there runs
+ * with full access to this app's localStorage (the whole customer/staff
+ * database, including staff password hashes and the signed-in session).
+ *
+ * The values being interpolated are customer names, villages, remarks, IMEIs
+ * and so on. Those come from operator input AND from the shared Google Sheet,
+ * which is writable by anyone who has the Web App URL — so a hostile value
+ * reaching a print template is a realistic stored-XSS path, not a theoretical
+ * one. Route EVERY dynamic value in an HTML template through this.
+ */
+export function escapeHtml(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}

@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader } from "@/components/ui-kit";
 import { downloadExcel, downloadCustomerStatementExcel, useStore, parseAppDate, isDateInRange, buildCollections } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
+import { escapeHtml } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -199,7 +200,7 @@ function ReportsPage() {
       const statementHtml = `
         <html>
           <head>
-            <title>${c.name} - Statement - Jain Finance</title>
+            <title>${escapeHtml(c.name)} - Statement - Jain Finance</title>
             <style>
               @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
               body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; background: white; }
@@ -232,29 +233,29 @@ function ReportsPage() {
               </div>
               <div class="meta">
                 <p><strong>Statement Date:</strong> ${new Date().toLocaleDateString("en-IN")}</p>
-                <p><strong>Customer ID:</strong> ${c.id}</p>
+                <p><strong>Customer ID:</strong> ${escapeHtml(c.id)}</p>
               </div>
             </div>
             
             <div class="grid">
               <div class="section-card">
                 <h2>Customer Profile</h2>
-                <div class="row"><span>Full Name</span><span>${c.name}</span></div>
-                <div class="row"><span>Mobile No</span><span>${c.mobile}</span></div>
-                <div class="row"><span>Aadhaar Card</span><span>${c.aadhaar}</span></div>
-                <div class="row"><span>Guarantor</span><span>${c.guarantyName || "—"} (${c.guarantyMobile || "—"})</span></div>
-                <div class="row"><span>Village</span><span>${c.village}</span></div>
+                <div class="row"><span>Full Name</span><span>${escapeHtml(c.name)}</span></div>
+                <div class="row"><span>Mobile No</span><span>${escapeHtml(c.mobile)}</span></div>
+                <div class="row"><span>Aadhaar Card</span><span>${escapeHtml(c.aadhaar)}</span></div>
+                <div class="row"><span>Guarantor</span><span>${escapeHtml(c.guarantyName || "—")} (${escapeHtml(c.guarantyMobile || "—")})</span></div>
+                <div class="row"><span>Village</span><span>${escapeHtml(c.village)}</span></div>
               </div>
               <div class="section-card">
                 <h2>Device & Finance Details</h2>
-                <div class="row"><span>Device Purchased</span><span>${c.mobileBrand} ${c.mobileModel}</span></div>
-                <div class="row"><span>IMEI 1 / 2</span><span>${c.imei1} / ${c.imei2 || "—"}</span></div>
+                <div class="row"><span>Device Purchased</span><span>${escapeHtml(c.mobileBrand)} ${escapeHtml(c.mobileModel)}</span></div>
+                <div class="row"><span>IMEI 1 / 2</span><span>${escapeHtml(c.imei1)} / ${escapeHtml(c.imei2 || "—")}</span></div>
                 <div class="row"><span>Selling Price</span><span>${safeFormatInr(c.price)}</span></div>
                 <div class="row"><span>Down Payment</span><span>${safeFormatInr(c.deposit)}</span></div>
                 <div class="row"><span>Monthly EMI</span><span>${safeFormatInr(c.perMonthEmi)}</span></div>
-                <div class="row"><span>Installments</span><span>${c.paidEmis} / ${c.noOfEmi} Paid</span></div>
+                <div class="row"><span>Installments</span><span>${escapeHtml(c.paidEmis)} / ${escapeHtml(c.noOfEmi)} Paid</span></div>
                 <div class="row"><span>Outstanding Balance</span><span style="color: #ef4444;">${safeFormatInr(c.pendingAmount)}</span></div>
-                <div class="row"><span>Status</span><span>${c.status}</span></div>
+                <div class="row"><span>Status</span><span>${escapeHtml(c.status)}</span></div>
               </div>
             </div>
 
@@ -275,12 +276,12 @@ function ReportsPage() {
                   ? `<tr><td colspan="6" style="text-align:center; color:#94a3b8; padding: 20px;">No payments recorded yet.</td></tr>`
                   : custPayments.map((p) => `
                     <tr>
-                      <td><strong>${p.id}</strong></td>
-                      <td>${p.date}</td>
-                      <td>${p.method}</td>
-                      <td>${p.collector}</td>
-                      <td>${p.remarks || "—"}</td>
-                      <td style="text-align: right; font-weight: 600; color: #16a34a;">${p.amount}</td>
+                      <td><strong>${escapeHtml(p.id)}</strong></td>
+                      <td>${escapeHtml(p.date)}</td>
+                      <td>${escapeHtml(p.method)}</td>
+                      <td>${escapeHtml(p.collector)}</td>
+                      <td>${escapeHtml(p.remarks || "—")}</td>
+                      <td style="text-align: right; font-weight: 600; color: #16a34a;">${escapeHtml(p.amount)}</td>
                     </tr>
                   `).join("")}
               </tbody>
@@ -322,15 +323,15 @@ function ReportsPage() {
 
       const headers = Object.keys(rows[0]);
       const tableRowsHtml = rows.map((row) => {
-        return `<tr>${headers.map((h) => `<td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; text-align: left;">${row[h] !== undefined ? String(row[h]) : "—"}</td>`).join("")}</tr>`;
+        return `<tr>${headers.map((h) => `<td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; text-align: left;">${row[h] !== undefined ? escapeHtml(row[h]) : "—"}</td>`).join("")}</tr>`;
       }).join("");
 
-      const headersHtml = headers.map((h) => `<th style="padding: 12px 10px; border-bottom: 2px solid #cbd5e1; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; color: #475569; background-color: #f8fafc;">${h}</th>`).join("");
+      const headersHtml = headers.map((h) => `<th style="padding: 12px 10px; border-bottom: 2px solid #cbd5e1; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; color: #475569; background-color: #f8fafc;">${escapeHtml(h)}</th>`).join("");
 
       const reportHtml = `
         <html>
           <head>
-            <title>${reportName} - Jain Finance</title>
+            <title>${escapeHtml(reportName)} - Jain Finance</title>
             <style>
               @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
               body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; background: white; }
@@ -346,7 +347,7 @@ function ReportsPage() {
             <div class="header">
               <div>
                 <h1>JAIN FINANCE</h1>
-                <p>${reportName} Statement</p>
+                <p>${escapeHtml(reportName)} Statement</p>
               </div>
               <div class="meta-info">
                 <p><strong>Generated:</strong> ${new Date().toLocaleDateString("en-IN")} ${new Date().toLocaleTimeString("en-IN")}</p>

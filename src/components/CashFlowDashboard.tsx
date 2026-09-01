@@ -58,7 +58,10 @@ export function CashFlowDashboard() {
   const fPayments = useStore((s) => s.payments);
   const fExpenses = useStore((s) => s.expenses);
   const fInvestments = useStore((s) => s.investments);
-  const fProfitTxns = useStore((s) => s.profitTransactions) || [];
+  // `?? []` inside the selector would hand back a brand-new array on every
+  // render, which defeats the memo below. Fall back once, outside the selector.
+  const fProfitTxnsRaw = useStore((s) => s.profitTransactions);
+  const fProfitTxns = useMemo(() => fProfitTxnsRaw ?? [], [fProfitTxnsRaw]);
 
   // Mobiles store
   const mSales = useMobileStore((s) => s.sales);
@@ -272,7 +275,11 @@ export function CashFlowDashboard() {
     });
 
     return items;
-  }, [fCustomers, fPayments, fExpenses, fInvestments]);
+    // fProfitTxns was missing here, so a profit withdrawal or redeposit made in
+    // this session never re-derived the ledger: the Withdraw/Deposit page showed
+    // the new transaction while Cash & UPI Flow kept reporting the old balances
+    // until something else happened to change one of the other four lists.
+  }, [fCustomers, fPayments, fExpenses, fInvestments, fProfitTxns]);
 
   // --- 3. Calculate Mobiles Cash Flow Items ---
   const mobilesItems = useMemo(() => {

@@ -1173,12 +1173,24 @@ export const useMobileStore = create<MobilesState>()(
         const sale = get().sales.find((s) => s.id === saleId);
         if (!sale || amount <= 0) return;
 
-        const newAmountPaid = (sale.amountPaid || 0) + amount;
-        const newDueAmount = Math.max(0, sale.totalAmount - newAmountPaid);
+        // Cap the receipt at what is actually outstanding. The dialog rejects an
+        // over-payment, but the dialog is not the only caller (a reconciled
+        // sheet row, a future screen, a replayed action all reach this directly)
+        // and without the cap amountPaid climbs past totalAmount while dueAmount
+        // clamps at 0 — so the bill reads "Full Paid" while the cash/UPI split
+        // reports money the shop never took. payPurchaseBalance already caps the
+        // mirror-image case on the supplier side.
+        const currentPaid = Number(sale.amountPaid) || 0;
+        const outstanding = Math.max(0, (Number(sale.totalAmount) || 0) - currentPaid);
+        if (outstanding <= 0) return;
+        const payAmt = Math.min(amount, outstanding);
+
+        const newAmountPaid = currentPaid + payAmt;
+        const newDueAmount = Math.max(0, (Number(sale.totalAmount) || 0) - newAmountPaid);
         const newPaymentStatus: MobileSale["paymentStatus"] = newDueAmount <= 0 ? "Full Paid" : "Partial Paid";
 
-        const updatedCashPaid = (sale.cashAmountPaid || 0) + (paymentMethod === "Cash" ? amount : 0);
-        const updatedUpiPaid = (sale.upiAmountPaid || 0) + (paymentMethod === "UPI" ? amount : 0);
+        const updatedCashPaid = (sale.cashAmountPaid || 0) + (paymentMethod === "Cash" ? payAmt : 0);
+        const updatedUpiPaid = (sale.upiAmountPaid || 0) + (paymentMethod === "UPI" ? payAmt : 0);
 
         set((state) => ({
           sales: state.sales.map((s) =>
@@ -1198,7 +1210,7 @@ export const useMobileStore = create<MobilesState>()(
         get().pushAudit({
           user: "Admin",
           action: "COLLECT_SALE_DUE",
-          target: `Collected ₹${amount} (${paymentMethod}) for Bill ${saleId} from ${sale.customerName}. Remaining Due: ₹${newDueAmount}`,
+          target: `Collected ₹${payAmt} (${paymentMethod}) for Bill ${saleId} from ${sale.customerName}. Remaining Due: ₹${newDueAmount}`,
         });
         const updatedSale = get().sales.find((s) => s.id === saleId);
         if (updatedSale) syncUpsert(get, "Mobiles_Sales", saleRow(updatedSale), "sale payment");
@@ -1497,7 +1509,12 @@ export const useMobileStore = create<MobilesState>()(
               items: parsedItems,
             };
           });
-          set({ sales: sanitizedSales as unknown as MobileSale[] });
+          // Same guard as every other table here: Code.gs answers a missing or
+          // header-only tab with {status:"ok", rows: []}, so an unconditional
+          // set() wiped this device's sales/purchases/accessories/warranties.
+          if (salesRows.length > 0 || get().sales.length === 0) {
+            set({ sales: sanitizedSales as unknown as MobileSale[] });
+          }
 
           if (expRows.length > 0 || get().expenses.length === 0) set({ expenses: expRows as unknown as MobileExpense[] });
           const sanitizedSuppliers = supRows.map((r: any) => ({
@@ -1593,7 +1610,9 @@ export const useMobileStore = create<MobilesState>()(
               items: parsedItems,
             };
           });
-          set({ purchases: sanitizedPurchases as unknown as MobilePurchase[] });
+          if (purRows.length > 0 || get().purchases.length === 0) {
+            set({ purchases: sanitizedPurchases as unknown as MobilePurchase[] });
+          }
 
           const sanitizedAcc = accRows.map((r: any) => ({
             ...r,
@@ -1602,9 +1621,13 @@ export const useMobileStore = create<MobilesState>()(
             purchasePrice: Number(r.purchasePrice) || 0,
             sellingPrice: Number(r.sellingPrice) || 0,
           }));
-          set({ accessories: sanitizedAcc as unknown as MobileAccessory[] });
+          if (accRows.length > 0 || get().accessories.length === 0) {
+            set({ accessories: sanitizedAcc as unknown as MobileAccessory[] });
+          }
 
-          set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
+          if (warRows.length > 0 || get().warranties.length === 0) {
+            set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
+          }
 
           const savedSettings = setRows.find((r: any) => String(r?.id) === MOBILE_SETTINGS_ROW_ID);
           if (savedSettings) {

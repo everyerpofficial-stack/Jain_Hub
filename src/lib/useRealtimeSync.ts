@@ -24,7 +24,7 @@ import {
   mobileSettingsRow, MOBILE_SETTINGS_ROW_ID,
 } from "./mobileStore";
 import { digestSheets, readSheet, upsertRow, type SheetName, type SheetRow } from "./googleSheets";
-import { isSheetBusy, isIdDeleted, isSheetUnavailable } from "./syncQueue";
+import { isSheetBusy, isIdDeleted, isSheetUnavailable, recordSheetIds, wasSeenOnSheet } from "./syncQueue";
 import { toOptionalNumber } from "./ledger";
 import { toast } from "sonner";
 
@@ -119,20 +119,38 @@ function safeReconcile<T extends { id?: string }>(
   // 2. Map of sheet items by ID
   const sheetMap = new Map<string, T>(rows.map((r) => [String(r.id), r]));
 
+  // Remember what the sheet holds right now. This is what lets step 3 tell a
+  // record deleted by another device apart from a record that has never
+  // reached the sheet — see the note on recordSheetIds in syncQueue.ts.
+  recordSheetIds(
+    sheet,
+    rows.map((r) => String(r.id ?? "")).filter(Boolean)
+  );
+
   // Start with rows from Google Sheets
   const merged: T[] = [...rows];
 
-  // 3. Preserve local items NOT present on the sheet (unless user explicitly deleted them)
+  // 3. Decide what to do with each local record the sheet does not have.
+  let removedRemotely = 0;
   for (const loc of localList) {
     if (!loc || !loc.id) continue;
     const idStr = String(loc.id);
-    if (!sheetMap.has(idStr)) {
-      if (!isIdDeleted(sheet, idStr)) {
-        merged.push(loc);
-        // Upload un-synced local record to Google Sheets
-        push(loc);
-      }
+    if (sheetMap.has(idStr)) continue;
+
+    // Deleted on this device; the delete may still be in flight.
+    if (isIdDeleted(sheet, idStr)) continue;
+
+    // This device has seen the row on the sheet before and it is gone now, so
+    // somebody deleted it. Dropping it locally is the point: re-uploading it
+    // (which is what happened before) undid the deletion for the whole shop.
+    if (wasSeenOnSheet(sheet, idStr)) {
+      removedRemotely++;
+      continue;
     }
+
+    // Never been on the sheet — a genuinely un-synced local record.
+    merged.push(loc);
+    push(loc);
   }
 
   const localJSON = JSON.stringify(localList);
@@ -143,6 +161,11 @@ function safeReconcile<T extends { id?: string }>(
     const newFromSheetCount = rows.filter((r) => !localList.some((l) => String(l.id) === String(r.id))).length;
     if (newFromSheetCount > 0) {
       toast.info(`↓ ${newFromSheetCount} new records synced from ${sheet}`);
+    }
+    if (removedRemotely > 0) {
+      toast.info(`↩ ${removedRemotely} record(s) removed on another device`, {
+        description: `Deleted from ${sheet} elsewhere and now removed here too.`,
+      });
     }
   }
 }
@@ -157,8 +180,18 @@ export function useRealtimeSync() {
   // Mobiles store
   const mobConfig = useMobileStore((s) => s.sheetsConfig);
 
+  // The poller pulls the entire book — every customer with their Aadhaar and
+  // mobile number, every payment, and the staff directory with its password
+  // hashes — into this browser's localStorage. This hook is mounted by the
+  // root route, which renders the login screen for a signed-out visitor, so
+  // without this check that whole download happened before anyone signed in
+  // (and kept re-running, burning Apps Script quota, on an idle login screen).
+  const currentUser = useStore((s) => s.currentUser);
+
   useEffect(() => {
     isMountedRef.current = true;
+
+    if (!currentUser) return;
 
     // Only run if we have a configured URL
     const url = finConfig.url || mobConfig.url;
@@ -236,19 +269,25 @@ export function useRealtimeSync() {
       document.removeEventListener("visibilitychange", handleFocusOrVisibility);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finConfig.url, finConfig.enabled]);
+  }, [finConfig.url, finConfig.enabled, currentUser?.id]);
 }
 
 // ── Finance reconciliation ──────────────────────────────────────────────────
 async function reconcileFinance(url: string, sheets: string[]): Promise<string[]> {
   const deferred: string[] = [];
-  const finState = useStore.getState();
   const setFin = (fn: (s: any) => any) => useStore.setState(fn);
 
   for (const sheet of sheets) {
     if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
       const rows = await readSheet(url, sheet as SheetName);
+
+      // Read state AFTER the await, once per sheet. A snapshot taken before the
+      // loop goes stale the moment an earlier iteration writes, or the operator
+      // adds a record while the fetch is in flight — and safeReconcile then
+      // treats those newer local records as "missing from the sheet", re-uploads
+      // them and writes the stale list straight back over the store.
+      const finState = useStore.getState();
 
       if (sheet === "Finance_Customers") {
         const sanitized = rows.map((r: any) => ({

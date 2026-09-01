@@ -8,6 +8,17 @@ import { useStore, type AppDocument, parseAppDate, isDateInRange } from "@/lib/s
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+/**
+ * Sandbox for the stored-invoice preview frame.
+ *
+ * A stored invoice is HTML assembled from customer fields, and invoices
+ * generated before those fields were escaped are still sitting in the document
+ * vault. Omitting `allow-scripts` makes any script inside such a document inert;
+ * keeping `allow-same-origin` leaves the frame reachable so the Print button can
+ * call `contentWindow.print()` on it.
+ */
+const INVOICE_IFRAME_SANDBOX = "allow-same-origin allow-modals";
+
 export const Route = createFileRoute("/documents")({
   head: () => ({
     meta: [
@@ -315,6 +326,7 @@ function DocumentsPage() {
                     id="invoice-iframe"
                     title="Invoice Preview"
                     srcDoc={getSrcDoc(previewDoc.fileUrl)}
+                    sandbox={INVOICE_IFRAME_SANDBOX}
                     className="w-full h-[60vh] border-0 bg-white"
                   />
                 ) : (previewDoc.fileUrl?.startsWith("data:image/") || previewDoc.driveUrl) ? (

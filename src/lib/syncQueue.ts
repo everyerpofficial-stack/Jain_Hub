@@ -24,6 +24,7 @@
 
 import { toast } from "sonner";
 import type { SheetName } from "./googleSheets";
+import { safeLocalStorage } from "./safeStorage";
 
 /** Attempts per write before giving up and telling the user. */
 const MAX_ATTEMPTS = 3;
@@ -145,6 +146,82 @@ export function enqueueWrite(
     inFlight.set(sheet, Math.max(0, n));
     settledAt.set(sheet, Date.now());
   });
+}
+
+/**
+ * IDs this device has positively observed on the sheet.
+ *
+ * THE BUG THIS FIXES: a delete never stuck across devices. safeReconcile treats
+ * "local record the sheet doesn't have" as "a record that hasn't synced yet"
+ * and re-uploads it. So when device A deleted a customer, device B — which
+ * still had that customer locally and had no idea it was ever deleted — put the
+ * row straight back on the sheet at its next 20-second poll, and device A got
+ * it back too. Deleting anything was effectively impossible with two devices in
+ * the shop.
+ *
+ * The missing piece was a way to tell those two cases apart, which needs
+ * memory: a record that USED to be on the sheet and now isn't was deleted by
+ * someone; a record that has never been on the sheet is genuinely unsynced.
+ * That is exactly what this set records. It is persisted, because a page reload
+ * would otherwise reset the distinction and resurrect the record anyway.
+ */
+const SEEN_IDS_KEY = "jain-sync-seen-ids";
+/** Upper bound per sheet, so this can never grow without limit. */
+const MAX_SEEN_PER_SHEET = 20_000;
+
+let seenCache: Map<string, Set<string>> | null = null;
+
+function loadSeen(): Map<string, Set<string>> {
+  if (seenCache) return seenCache;
+  seenCache = new Map();
+  const raw = safeLocalStorage.getItem(SEEN_IDS_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      for (const [sheet, ids] of Object.entries(parsed)) {
+        if (Array.isArray(ids)) seenCache.set(sheet, new Set(ids));
+      }
+    } catch {
+      // Corrupt entry — start over rather than blocking sync.
+    }
+  }
+  return seenCache;
+}
+
+function persistSeen(): void {
+  const out: Record<string, string[]> = {};
+  for (const [sheet, ids] of loadSeen()) out[sheet] = [...ids];
+  safeLocalStorage.setItem(SEEN_IDS_KEY, JSON.stringify(out));
+}
+
+/** Record every id a successful sheet read returned. */
+export function recordSheetIds(sheet: string, ids: string[]): void {
+  if (ids.length === 0) return;
+  const all = loadSeen();
+  let set = all.get(sheet);
+  if (!set) {
+    set = new Set();
+    all.set(sheet, set);
+  }
+  let added = false;
+  for (const id of ids) {
+    if (id && !set.has(id)) {
+      set.add(id);
+      added = true;
+    }
+  }
+  if (!added) return;
+  if (set.size > MAX_SEEN_PER_SHEET) {
+    // Sets iterate in insertion order, so this drops the oldest entries.
+    const trimmed = [...set].slice(set.size - MAX_SEEN_PER_SHEET);
+    all.set(sheet, new Set(trimmed));
+  }
+  persistSeen();
+}
+
+/** True if a successful read of this sheet has ever returned this id. */
+export function wasSeenOnSheet(sheet: string, id: string): boolean {
+  return loadSeen().get(sheet)?.has(id) ?? false;
 }
 
 /** Registry of IDs explicitly deleted by the user on this device. */

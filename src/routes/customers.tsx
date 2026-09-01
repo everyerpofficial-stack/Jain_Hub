@@ -9,6 +9,17 @@ import { downloadExcel, useStore, type Customer, type AppDocument, REGIONS, VILL
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
+/**
+ * Sandbox for the stored-invoice preview frame.
+ *
+ * A stored invoice is HTML assembled from customer fields, and invoices
+ * generated before those fields were escaped are still sitting in the document
+ * vault. Omitting `allow-scripts` makes any script inside such a document inert;
+ * keeping `allow-same-origin` leaves the frame reachable so the Print button can
+ * call `contentWindow.print()` on it.
+ */
+const INVOICE_IFRAME_SANDBOX = "allow-same-origin allow-modals";
+
 export const Route = createFileRoute("/customers")({
   head: () => ({
     meta: [
@@ -42,20 +53,25 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
   const cPayments = allPayments.filter((p) => p.customerId === customer.id);
   const customerDocs = documents.filter((d) => d.customerId === customer.id);
 
+  // Prints the already-rendered preview iframe rather than document.write()-ing
+  // the stored invoice HTML into a fresh same-origin popup. A stored invoice is
+  // HTML assembled from customer fields; writing it into a same-origin window
+  // would run anything embedded in those fields with full access to this app's
+  // localStorage. The preview iframe is sandboxed without allow-scripts, so
+  // printing through it renders the same document with scripts inert.
   const handlePrintInvoice = (doc: AppDocument) => {
     if (!doc.fileUrl) return;
-    const printWindow = window.open("", "_blank");
-    if (printWindow) {
+    const iframe = document.getElementById("customer-invoice-iframe") as HTMLIFrameElement | null;
+    if (iframe?.contentWindow) {
       try {
-        const decoded = decodeURIComponent(doc.fileUrl.replace("data:text/html;charset=utf-8,", ""));
-        printWindow.document.write(decoded);
-        printWindow.document.close();
-        printWindow.focus();
-        printWindow.print();
-      } catch (err) {
-        toast.error("Failed to print invoice");
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        return;
+      } catch {
+        // Fall through to the message below rather than leaving the click dead.
       }
     }
+    toast.error("Open the invoice preview first, then press Print");
   };
 
   const getSrcDoc = (url?: string) => {
@@ -460,8 +476,10 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
             <div className="rounded-lg border border-border overflow-hidden bg-white dark:bg-zinc-950 p-2 flex items-center justify-center min-h-[300px]">
               {previewDoc.type === "Invoice" && previewDoc.fileUrl ? (
                 <iframe
+                  id="customer-invoice-iframe"
                   title="Invoice Preview"
                   srcDoc={getSrcDoc(previewDoc.fileUrl)}
+                  sandbox={INVOICE_IFRAME_SANDBOX}
                   className="w-full h-[60vh] border-0 bg-white"
                 />
               ) : (previewDoc.fileUrl?.startsWith("data:image/") || previewDoc.driveUrl) ? (
