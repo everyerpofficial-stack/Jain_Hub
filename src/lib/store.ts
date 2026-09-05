@@ -554,7 +554,7 @@ const FAKE_AUDIT_TS = new Set([
  * through the one-time bootstrap credential below.
  */
 export const seedStaff: Staff[] = [
-  { id: "ST-001", name: "Avinash G", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both" },
+  { id: "ST-001", name: "Rishi Rathod", email: "jainmobile7828@gmail.com", role: "Admin", status: "Active", access: "Both" },
 ];
 
 /**
@@ -2251,9 +2251,16 @@ export const useStore = create<State>()(
           ? merged.audit.filter((a: any) => !FAKE_AUDIT_TS.has(a?.ts))
           : [];
         merged.documents = Array.isArray(merged.documents) ? merged.documents : [];
-        merged.staff = Array.isArray(merged.staff) && merged.staff.length > 0
+        merged.staff = (Array.isArray(merged.staff) && merged.staff.length > 0
           ? merged.staff.filter((s: any) => (s.name && String(s.name).trim()) || (s.email && String(s.email).trim()))
-          : seedStaff;
+          : seedStaff).map((s: any) =>
+            s.email?.toLowerCase() === "jainmobile7828@gmail.com" || s.name === "Avinash G"
+              ? { ...s, name: "Rishi Rathod" }
+              : s
+          );
+        if (merged.currentUser && (merged.currentUser.name === "Avinash G" || merged.currentUser.email === "jainmobile7828@gmail.com")) {
+          merged.currentUser = { ...merged.currentUser, name: "Rishi Rathod" };
+        }
         // PERMANENT: Always force the hardcoded URL — no per-device config needed
         merged.sheetsConfig = {
           url: PERMANENT_SHEETS_URL,

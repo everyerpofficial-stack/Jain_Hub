@@ -27,6 +27,7 @@ export const Route = createFileRoute("/mobiles/")({
 
 function MobilesDashboard() {
   const currentUser = useStore((s) => s.currentUser);
+  const isAdmin = currentUser?.role ? String(currentUser.role).toLowerCase() === "admin" : false;
   const products = useMobileStore((s) => s.products);
   const inventory = useMobileStore((s) => s.inventory);
   const sales = useMobileStore((s) => s.sales);
@@ -271,7 +272,7 @@ function MobilesDashboard() {
       />
 
       {/* Key stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className={`grid grid-cols-2 ${isAdmin ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4 mb-6`}>
         <StatCard
           label="Total Products"
           value={totalProducts.toString()}
@@ -293,13 +294,15 @@ function MobilesDashboard() {
           icon={<Receipt className="size-4" />}
           trend="up"
         />
-        <StatCard
-          label="Monthly Profit"
-          value={fmt(periodProfitVal)}
-          sub="Realized margin"
-          icon={<Landmark className="size-4" />}
-          trend={periodProfitVal > 0 ? "up" : "down"}
-        />
+        {isAdmin && (
+          <StatCard
+            label="Monthly Profit"
+            value={fmt(periodProfitVal)}
+            sub="Realized margin"
+            icon={<Landmark className="size-4" />}
+            trend={periodProfitVal > 0 ? "up" : "down"}
+          />
+        )}
       </div>
 
       {/* Secondary stats cards */}

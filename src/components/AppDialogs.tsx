@@ -279,7 +279,7 @@ function CustomerDialog() {
           {/* LEFT — Personal Details */}
           <div className="p-5 space-y-3">
             <SectionTitle>Personal Information</SectionTitle>
-            <Field label="Customer Name (First)" value={firstName} onChange={setFirstName} placeholder="e.g. Avinash" />
+            <Field label="Customer Name (First)" value={firstName} onChange={setFirstName} placeholder="e.g. Rishi" />
             <Field label="Father's Name" value={fatherName} onChange={setFatherName} placeholder="e.g. Ramesh" />
             <Field label="Surname" value={surname} onChange={setSurname} placeholder="e.g. Patil" />
             <Field
@@ -492,7 +492,7 @@ function CollectDialog() {
   const currentUser = useStore((s) => s.currentUser);
   const recordPayment = useStore((s) => s.recordPayment);
 
-  const defaultCollector = currentUser?.name || staff[0]?.name || "Avinash G";
+  const defaultCollector = currentUser?.name || staff[0]?.name || "Rishi Rathod";
 
   const [customerId, setCustomerId] = useState("");
   const [amount, setAmount] = useState("");
@@ -518,7 +518,7 @@ function CollectDialog() {
       }
       setRemarks("");
       setDate(getTodayYmd());
-      setCollector(currentUser?.name || staff[0]?.name || "Avinash G");
+      setCollector(currentUser?.name || staff[0]?.name || "Rishi Rathod");
       setCustomCollectorName("");
       setMethod("Cash");
     }

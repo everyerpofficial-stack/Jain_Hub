@@ -28,6 +28,7 @@ export const Route = createFileRoute("/")({
 function Dashboard() {
   const { openDialog } = useUi();
   const currentUser = useStore((s) => s.currentUser);
+  const isAdmin = currentUser?.role ? String(currentUser.role).toLowerCase() === "admin" : false;
   const customers = useStore((s) => s.customers);
   const payments = useStore((s) => s.payments);
   const expenses = useStore((s) => s.expenses);
@@ -281,7 +282,7 @@ function Dashboard() {
       />
 
       {/* Key stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className={`grid grid-cols-2 ${isAdmin ? "md:grid-cols-4" : "md:grid-cols-3"} gap-4 mb-6`}>
         <StatCard
           label={filterPreset === "all" ? "Total Customers" : "New Customers"}
           value={totalCustomers.toString()}
@@ -296,13 +297,15 @@ function Dashboard() {
           icon={<IndianRupee className="size-4" />}
           trend={overdueCustomers > 0 ? "warn" : "up"}
         />
-        <StatCard
-          label="Net Profit"
-          value={fmt(netProfit)}
-          sub={`File Chg + Interest − Exp`}
-          icon={<TrendingUp className="size-4" />}
-          trend={netProfit > 0 ? "up" : "down"}
-        />
+        {isAdmin && (
+          <StatCard
+            label="Net Profit"
+            value={fmt(netProfit)}
+            sub={`File Chg + Interest − Exp`}
+            icon={<TrendingUp className="size-4" />}
+            trend={netProfit > 0 ? "up" : "down"}
+          />
+        )}
         <StatCard
           label={filterPreset === "all" ? "Total Collection" : "Collection in Period"}
           value={fmt(periodCollection)}
@@ -313,11 +316,15 @@ function Dashboard() {
       </div>
 
       {/* Secondary stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className={`grid grid-cols-2 ${isAdmin ? "md:grid-cols-4" : "md:grid-cols-2"} gap-4 mb-6`}>
         <StatCard label="File Charge Income" value={fmt(totalFileCharge)} sub="10% of selling price" />
-        <StatCard label="Interest Income" value={fmt(collectedInterest)} sub="Realised in period" />
+        {isAdmin && (
+          <StatCard label="Interest Income" value={fmt(collectedInterest)} sub="Realised in period" />
+        )}
         <StatCard label="Total Expenses" value={fmt(totalExpenses)} sub={`${filteredExpenses.length} entries`} trend="warn" />
-        <StatCard label="Total Investment" value={fmt(totalInvestment)} sub={`${investments.filter(i => filterPreset === "all" ? true : isDateInRange(parseAppDate(i.maturity), startDate, endDate)).length} investors`} />
+        {isAdmin && (
+          <StatCard label="Total Investment" value={fmt(totalInvestment)} sub={`${investments.filter(i => filterPreset === "all" ? true : isDateInRange(parseAppDate(i.maturity), startDate, endDate)).length} investors`} />
+        )}
       </div>
 
       {/* Overdue alert */}
