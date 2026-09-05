@@ -237,3 +237,13 @@ export function isIdDeleted(sheet: string, id: string): boolean {
   return deletedIdsRegistry.has(`${sheet}::${id}`);
 }
 
+/** Clear all tracked seen IDs, deleted IDs, and in-flight/settled states (used when clearing database). */
+export function clearSyncState(): void {
+  seenCache = new Map();
+  deletedIdsRegistry.clear();
+  inFlight.clear();
+  settledAt.clear();
+  safeLocalStorage.removeItem(SEEN_IDS_KEY);
+}
+
+

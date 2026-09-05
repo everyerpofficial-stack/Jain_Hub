@@ -114,7 +114,7 @@ function doGet(e) {
     // that window entirely, at the cost of requests queueing briefly
     // when two happen at the exact same moment (rare for this app's
     // traffic, and far cheaper than a data-loss bug).
-    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest") {
+    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest" || action === "clearSheets") {
       lock = LockService.getScriptLock();
       var gotLock = lock.tryLock(10000);
       if (!gotLock) {
@@ -129,7 +129,7 @@ function doGet(e) {
     // ── 0b. Guard: shared API key (if configured via Script Properties) ─
     // Gates every data-bearing action. "ping" stays open so the Settings
     // page can sanity-check connectivity before a key is even set up.
-    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest" || action === "driveUpload") {
+    if (action === "read" || action === "write" || action === "append" || action === "upsert" || action === "delete" || action === "digest" || action === "driveUpload" || action === "clearSheets") {
       var configuredKey = PropertiesService.getScriptProperties().getProperty("API_KEY") || "";
       if (configuredKey && reqKey !== configuredKey) {
         return jsonResponse({ status: "error", error: "Unauthorized: invalid or missing API key" });
@@ -330,6 +330,26 @@ function doGet(e) {
       });
 
       return jsonResponse({ status: "ok", rows: rows, count: rows.length });
+    }
+
+    // ── 3b. Clear multiple sheets in one atomic operation ────────────
+    if (action === "clearSheets") {
+      var sheetsParam = (e && e.parameter && e.parameter.sheets) || "";
+      if (!sheetsParam) return jsonResponse({ status: "error", error: "Missing 'sheets' param" });
+      var targetSheets = sheetsParam.split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+      var ssClear = SpreadsheetApp.openById(SPREADSHEET_ID);
+      var clearedCount = 0;
+      for (var ci = 0; ci < targetSheets.length; ci++) {
+        var sName = targetSheets[ci];
+        if (isAllowed(sName)) {
+          var shClear = ssClear.getSheetByName(sName);
+          if (shClear) {
+            shClear.clearContents();
+            clearedCount++;
+          }
+        }
+      }
+      return jsonResponse({ status: "ok", cleared: clearedCount });
     }
 
     // ── 4. Write rows (clear + rewrite) ───────────────────────────────

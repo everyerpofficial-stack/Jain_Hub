@@ -234,6 +234,50 @@ export async function writeSheet(
 }
 
 /**
+ * Reliably clear multiple sheets in Google Sheets.
+ * Uses atomic 'clearSheets' action if available, falling back to sequential writes with pause.
+ */
+export async function clearSheets(
+  url: string,
+  sheets: SheetName[]
+): Promise<{ ok: boolean; error?: string }> {
+  if (!url || sheets.length === 0) return { ok: true };
+
+  try {
+    const res = await getFromScript(url, { action: "clearSheets", sheets: sheets.join(",") });
+    if (res.status === "ok") {
+      return { ok: true };
+    }
+  } catch {
+    // Action clearSheets not supported by older deployment, fallback to sequential clears below
+  }
+
+  // Fallback: Clear sheets sequentially (NOT parallel) to prevent LockService contention
+  const failed: string[] = [];
+  for (const sheet of sheets) {
+    let success = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await writeSheet(url, sheet, []);
+        success = true;
+        break;
+      } catch (err) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    if (!success) failed.push(sheet);
+    // Pause between sheets so Apps Script releases lock cleanly
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  if (failed.length > 0) {
+    return { ok: false, error: `Could not clear sheets: ${failed.join(", ")}` };
+  }
+  return { ok: true };
+}
+
+
+/**
  * Upload a document file to the Apps Script's Drive folder and return its link.
  *
  * Files cannot live in the spreadsheet: a cell holds 50,000 characters and a

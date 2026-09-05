@@ -6,8 +6,9 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { safeLocalStorage } from "./safeStorage";
 import XLSX from "xlsx-js-style";
 import { toast } from "sonner";
-import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp, uploadFileToDrive, parseDataUrl } from "./googleSheets";
-import { enqueueWrite, markIdDeleted } from "./syncQueue";
+import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, clearSheets, readSheet, upsertRow, deleteRow, nowTimestamp, uploadFileToDrive, parseDataUrl } from "./googleSheets";
+import { enqueueWrite, markIdDeleted, clearSyncState } from "./syncQueue";
+import { resetRealtimeSyncCache } from "./useRealtimeSync";
 import { nextSeqId, escapeHtml } from "./utils";
 
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";
@@ -2033,24 +2034,30 @@ export const useStore = create<State>()(
           profitTransactions: [],
           notifications: [], audit: [], documents: [],
         });
-        // 2. Also clear Google Sheets — write empty arrays to all Finance sheets
+        // 2. Clear sync tracking state and digest cache
+        clearSyncState();
+        resetRealtimeSyncCache();
+
+        // 3. Clear Google Sheets — write empty arrays to all Finance sheets
         const { sheetsConfig } = get();
         if (sheetsConfig.enabled && sheetsConfig.url) {
-          try {
-            await Promise.all([
-              writeSheet(sheetsConfig.url, "Finance_Customers", []),
-              writeSheet(sheetsConfig.url, "Finance_Payments", []),
-              writeSheet(sheetsConfig.url, "Finance_Expenses", []),
-              writeSheet(sheetsConfig.url, "Finance_Investments", []),
-              writeSheet(sheetsConfig.url, "Finance_ProfitTransactions", []),
-              writeSheet(sheetsConfig.url, "Finance_Loans", []),
-              writeSheet(sheetsConfig.url, "Finance_Documents", []),
-            ]);
-            const ts = nowTimestamp();
-            set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
-          } catch (err) {
-            console.warn("[store] Failed to wipe Google Sheets Finance data:", err);
+          const financeSheets: SheetName[] = [
+            "Finance_Customers",
+            "Finance_Payments",
+            "Finance_Expenses",
+            "Finance_Investments",
+            "Finance_ProfitTransactions",
+            "Finance_Loans",
+            "Finance_Documents",
+            "Finance_Audit",
+          ];
+          const res = await clearSheets(sheetsConfig.url, financeSheets);
+          if (!res.ok) {
+            console.warn("[store] Google Sheets clear issue:", res.error);
+            toast.error(`Google Sheets clear notice: ${res.error}`);
           }
+          const ts = nowTimestamp();
+          set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
         }
       },
 

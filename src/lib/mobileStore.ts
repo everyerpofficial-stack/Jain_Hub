@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { toast } from "sonner";
 import { safeLocalStorage } from "./safeStorage";
 import { formatDateToInr, parseAppDate, useStore } from "./store";
-import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
+import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, clearSheets, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
-import { enqueueWrite, markIdDeleted } from "./syncQueue";
+import { enqueueWrite, markIdDeleted, clearSyncState } from "./syncQueue";
+import { resetRealtimeSyncCache } from "./useRealtimeSync";
 import { toOptionalNumber } from "./ledger";
 
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
@@ -1425,27 +1427,33 @@ export const useMobileStore = create<MobilesState>()(
           expenses: [],
           audit: []
         });
-        // 2. Also clear Google Sheets — write empty arrays to all Mobiles sheets
+        // 2. Clear sync tracking state and digest cache
+        clearSyncState();
+        resetRealtimeSyncCache();
+
+        // 3. Clear Google Sheets — write empty arrays to all Mobiles sheets
         const { sheetsConfig } = get();
         if (sheetsConfig.enabled && sheetsConfig.url) {
-          try {
-            await Promise.all([
-              writeSheet(sheetsConfig.url, "Mobiles_Sales", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Purchases", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Expenses", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Suppliers", []),
-              writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Customers", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Products", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Accessories", []),
-              writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", []),
-              writeSheet(sheetsConfig.url, "Mobiles_Settings", []),
-            ]);
-            const ts = nowTimestamp();
-            set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
-          } catch (err) {
-            console.warn("[mobileStore] Failed to wipe Google Sheets Mobiles data:", err);
+          const mobileSheets: SheetName[] = [
+            "Mobiles_Sales",
+            "Mobiles_Purchases",
+            "Mobiles_Expenses",
+            "Mobiles_Suppliers",
+            "Mobiles_SupplierPayments",
+            "Mobiles_Customers",
+            "Mobiles_Products",
+            "Mobiles_Accessories",
+            "Mobiles_WarrantyClaims",
+            "Mobiles_Settings",
+            "Mobiles_Audit",
+          ];
+          const res = await clearSheets(sheetsConfig.url, mobileSheets);
+          if (!res.ok) {
+            console.warn("[mobileStore] Google Sheets clear issue:", res.error);
+            toast.error(`Google Sheets clear notice: ${res.error}`);
           }
+          const ts = nowTimestamp();
+          set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
         }
       },
 

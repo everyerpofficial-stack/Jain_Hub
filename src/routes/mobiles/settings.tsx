@@ -173,10 +173,8 @@ function SettingsPage() {
     if (!confirm("Final confirmation: Delete ALL Finance AND Mobiles data now?")) return;
     setClearing(true);
     try {
-      await Promise.all([
-        resetSeed(),
-        resetMobiles(),
-      ]);
+      await resetSeed();
+      await resetMobiles();
       toast.success("All data cleared for both Finance & Mobiles modules");
     } catch (err: any) {
       toast.error(`Clear failed: ${err?.message || err}`);

@@ -105,13 +105,22 @@ function safeReconcile<T extends { id?: string }>(
     }
   };
 
-  // 1. If sheet returns 0 rows but local list has data:
-  // DO NOT wipe local list! Preserve local data and upload local items to Google Sheets.
+  // 1. If sheet returns 0 rows:
   if (rows.length === 0 && localList.length > 0) {
-    for (const item of localList) {
-      if (item && item.id && !isIdDeleted(sheet, String(item.id))) {
+    // Only re-upload items that have NEVER been seen on the sheet before (genuinely unsynced local drafts).
+    // If an item WAS seen on the sheet before and now the sheet has 0 rows, it means the sheet/database was cleared.
+    const genuinelyUnsynced = localList.filter(
+      (item) => item && item.id && !isIdDeleted(sheet, String(item.id)) && !wasSeenOnSheet(sheet, String(item.id))
+    );
+
+    if (genuinelyUnsynced.length > 0) {
+      for (const item of genuinelyUnsynced) {
         push(item);
       }
+      setter(() => ({ [key]: genuinelyUnsynced }));
+    } else {
+      // All local items were previously seen on sheet and now sheet has 0 rows -> clear local list too!
+      setter(() => ({ [key]: [] }));
     }
     return;
   }
@@ -170,9 +179,14 @@ function safeReconcile<T extends { id?: string }>(
   }
 }
 
+let globalDigestCache: Record<string, string | number> = {};
+
+export function resetRealtimeSyncCache() {
+  globalDigestCache = {};
+}
+
 export function useRealtimeSync() {
-  const lastDigestRef = useRef<Record<string, string | number>>({});
-  const isMountedRef  = useRef(true);
+  const isMountedRef = useRef(true);
 
   // Finance store
   const finConfig = useStore((s) => s.sheetsConfig);
@@ -211,7 +225,7 @@ export function useRealtimeSync() {
         const digest = await digestSheets(activeUrl);
         if (!digest || !isMountedRef.current) return;
 
-        const prev = lastDigestRef.current;
+        const prev = globalDigestCache;
         const changedFinance  = Object.keys(digest).filter(
           (k) => k.startsWith("Finance_") && String(digest[k]) !== String(prev[k] ?? "")
         );
@@ -219,7 +233,7 @@ export function useRealtimeSync() {
           (k) => k.startsWith("Mobiles_") && String(digest[k]) !== String(prev[k] ?? "")
         );
 
-        lastDigestRef.current = { ...digest };
+        globalDigestCache = { ...digest };
 
         // Step 2: Fetch only changed sheets
         const deferred: string[] = [];
@@ -230,7 +244,7 @@ export function useRealtimeSync() {
           deferred.push(...await reconcileMobiles(activeUrl, changedMobiles));
         }
 
-        for (const sheet of deferred) delete lastDigestRef.current[sheet];
+        for (const sheet of deferred) delete globalDigestCache[sheet];
 
         const reconciledAny =
           changedFinance.length + changedMobiles.length - deferred.length > 0;
