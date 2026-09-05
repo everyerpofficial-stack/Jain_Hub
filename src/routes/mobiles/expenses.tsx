@@ -28,7 +28,7 @@ function ExpenseFormDialog({ onClose }: { onClose: () => void }) {
   const currentExpense = allExpenses.filter((e) => e.type !== "Income").reduce((sum, e) => sum + parseAmount(e.amount), 0);
   const currentNetBalance = currentIncome - currentExpense;
   
-  const EXPENSE_CATEGORIES = ["Shop Rent", "Electricity", "Salary", "Tea & Snacks", "Utilities", "Marketing", "Other Expense"];
+  const EXPENSE_CATEGORIES = ["Shop Rent", "Electricity", "Salary", "Tea & Snacks", "Utilities", "Marketing", "Ashish Expense", "Other Expense"];
   const INCOME_CATEGORIES = ["Capital Infusion / Owner Investment", "Opening Cash Balance", "Accessories Income", "Repair Income", "Device Sales Income", "Other Income"];
 
   const getTodayYmd = () => {
@@ -262,6 +262,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Salary": "var(--foreground)",
   "Tea & Snacks": "var(--warning)",
   "Utilities": "var(--success)",
+  "Ashish Expense": "var(--warning)",
   // Income
   "Accessories Income": "var(--success)",
   "Repair Income": "var(--info)",

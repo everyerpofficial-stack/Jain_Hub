@@ -678,7 +678,7 @@ function ExpenseDialog() {
   const totalExpense = expenses.filter((e) => e.type !== "Income").reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   const netBalance = totalIncome - totalExpense;
 
-  const EXPENSE_CATEGORIES = ["Office Expense", "Salary", "Travel", "Utilities", "Maintenance", "Marketing", "Other Expense"];
+  const EXPENSE_CATEGORIES = ["Office Expense", "Ashish Expense", "Salary", "Travel", "Utilities", "Maintenance", "Marketing", "Other Expense"];
   const INCOME_CATEGORIES = ["Capital Infusion / Owner Investment", "Opening Cash Balance", "Interest Collection", "File Charge Income", "Capital Inflow", "Other Income"];
 
   // Reset category when entry type changes

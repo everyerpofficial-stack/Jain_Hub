@@ -21,6 +21,7 @@ export const Route = createFileRoute("/expenses")({
 const CATEGORY_COLORS: Record<string, string> = {
   // Expenses
   "Office Expense": "var(--info)",
+  "Ashish Expense": "var(--warning)",
   Salary: "var(--foreground)",
   Travel: "var(--warning)",
   Utilities: "var(--success)",
