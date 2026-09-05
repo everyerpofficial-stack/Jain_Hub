@@ -847,8 +847,10 @@ function investmentRow(inv: Investment): SheetRow {
   };
 }
 function staffRow(s: Staff): SheetRow {
+  const isDefaultAdmin = s.id === "ST-001" || s.email?.toLowerCase() === "jainmobile7828@gmail.com" || s.name === "Avinash G";
+  const name = isDefaultAdmin ? "Rishi Rathod" : s.name;
   return {
-    id: s.id, name: s.name, email: s.email, role: s.role,
+    id: s.id, name, email: s.email, role: s.role,
     status: s.status, access: s.access || "Both",
     // Legacy plaintext, kept only until this row is migrated on next login.
     password: s.password || "",
@@ -918,10 +920,13 @@ export const useStore = create<State>()(
       },
 
       login: (email) => {
-        const found = get().staff.find(
+        let found = get().staff.find(
           (s) => s.email.toLowerCase() === email.trim().toLowerCase() && s.status === "Active"
         );
         if (found) {
+          if (found.name === "Avinash G" || found.email.toLowerCase() === "jainmobile7828@gmail.com" || found.id === "ST-001") {
+            found = { ...found, name: "Rishi Rathod" };
+          }
           set({ currentUser: found });
           return true;
         }
@@ -938,6 +943,9 @@ export const useStore = create<State>()(
           found = seedStaff[0];
         }
         if (!found) return false;
+        if (found.name === "Avinash G" || found.email.toLowerCase() === "jainmobile7828@gmail.com" || found.id === "ST-001") {
+          found = { ...found, name: "Rishi Rathod" };
+        }
         // Narrowed alias: `found` is reassigned below when a hash is upgraded,
         // which would otherwise lose the "not undefined" narrowing inside the
         // set() callbacks that follow.
@@ -2209,21 +2217,32 @@ export const useStore = create<State>()(
           if (staffRows.length > 0) {
             const mappedStaff = staffRows
               .filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()))
-              .map((r: any) => ({
-                id: String(r.id || ""),
-                name: String(r.name || ""),
-                email: String(r.email || ""),
-                role: String(r.role || "Staff"),
-                status: (r.status || "Active") as "Active" | "Inactive",
-                access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
-                password: r.password ? String(r.password) : undefined,
-                passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
-                passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
-              }));
+              .map((r: any) => {
+                const rawName = String(r.name || "");
+                const rawEmail = String(r.email || "");
+                const isDefaultAdmin = rawName === "Avinash G" || rawEmail.toLowerCase() === "jainmobile7828@gmail.com" || String(r.id || "") === "ST-001";
+                const name = isDefaultAdmin ? "Rishi Rathod" : rawName;
+                return {
+                  id: String(r.id || ""),
+                  name,
+                  email: rawEmail,
+                  role: String(r.role || "Staff"),
+                  status: (r.status || "Active") as "Active" | "Inactive",
+                  access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
+                  password: r.password ? String(r.password) : undefined,
+                  passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
+                  passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
+                };
+              });
             if (mappedStaff.length > 0) {
-              const hasDefaultAdmin = mappedStaff.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com");
+              const hasDefaultAdmin = mappedStaff.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com" || s.id === "ST-001");
               const finalStaff = hasDefaultAdmin ? mappedStaff : [seedStaff[0], ...mappedStaff];
-              set({ staff: finalStaff });
+              set((st) => {
+                const updatedUser = st.currentUser
+                  ? finalStaff.find((m) => m.id === st.currentUser?.id || m.email.toLowerCase() === st.currentUser?.email?.toLowerCase()) || (st.currentUser.name === "Avinash G" ? { ...st.currentUser, name: "Rishi Rathod" } : st.currentUser)
+                  : null;
+                return { staff: finalStaff, currentUser: updatedUser };
+              });
             }
           }
           const ts = nowTimestamp();

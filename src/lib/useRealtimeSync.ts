@@ -401,38 +401,50 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
       if (sheet === "Finance_Staff") {
         const validRows = rows.filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()));
         if (validRows.length > 0) {
-          const newStaffList = validRows.map((r) => ({
-            id: String(r.id || ""),
-            name: String(r.name || ""),
-            email: String(r.email || ""),
-            role: String(r.role || "Staff"),
-            status: (r.status || "Active") as "Active" | "Inactive",
-            access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
-            password: r.password ? String(r.password) : undefined,
-            passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
-            passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
-          }));
+          const newStaffList = validRows.map((r: any) => {
+            const rawName = String(r.name || "");
+            const rawEmail = String(r.email || "");
+            const isDefaultAdmin = rawName === "Avinash G" || rawEmail.toLowerCase() === "jainmobile7828@gmail.com" || String(r.id || "") === "ST-001";
+            const name = isDefaultAdmin ? "Rishi Rathod" : rawName;
+            return {
+              id: String(r.id || ""),
+              name,
+              email: rawEmail,
+              role: String(r.role || "Staff"),
+              status: (r.status || "Active") as "Active" | "Inactive",
+              access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
+              password: r.password ? String(r.password) : undefined,
+              passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
+              passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
+            };
+          });
 
-          const hasDefaultAdmin = newStaffList.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com");
+          const hasDefaultAdmin = newStaffList.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com" || s.id === "ST-001");
           const finalStaffList = hasDefaultAdmin ? newStaffList : [seedStaff[0], ...newStaffList];
 
-          const normalizedCurrent = finState.staff.map((s) => ({
-            id: String(s.id || ""),
-            name: String(s.name || ""),
-            email: String(s.email || ""),
-            role: String(s.role || "Staff"),
-            status: (s.status || "Active") as "Active" | "Inactive",
-            access: (s.access || "Both") as "Finance" | "Mobiles" | "Both",
-            password: s.password ? String(s.password) : undefined,
-            passwordHash: s.passwordHash ? String(s.passwordHash) : undefined,
-            passwordSalt: s.passwordSalt ? String(s.passwordSalt) : undefined,
-          }));
+          const normalizedCurrent = finState.staff.map((s) => {
+            const rawName = String(s.name || "");
+            const rawEmail = String(s.email || "");
+            const isDefaultAdmin = rawName === "Avinash G" || rawEmail.toLowerCase() === "jainmobile7828@gmail.com" || String(s.id || "") === "ST-001";
+            const name = isDefaultAdmin ? "Rishi Rathod" : rawName;
+            return {
+              id: String(s.id || ""),
+              name,
+              email: rawEmail,
+              role: String(s.role || "Staff"),
+              status: (s.status || "Active") as "Active" | "Inactive",
+              access: (s.access || "Both") as "Finance" | "Mobiles" | "Both",
+              password: s.password ? String(s.password) : undefined,
+              passwordHash: s.passwordHash ? String(s.passwordHash) : undefined,
+              passwordSalt: s.passwordSalt ? String(s.passwordSalt) : undefined,
+            };
+          });
 
           const isDifferent = JSON.stringify(normalizedCurrent) !== JSON.stringify(finalStaffList);
           if (isDifferent) {
             useStore.setState((s) => {
               const updatedUser = s.currentUser
-                ? finalStaffList.find((m) => m.id === s.currentUser?.id) || s.currentUser
+                ? finalStaffList.find((m) => m.id === s.currentUser?.id || m.email.toLowerCase() === s.currentUser?.email?.toLowerCase()) || (s.currentUser.name === "Avinash G" ? { ...s.currentUser, name: "Rishi Rathod" } : s.currentUser)
                 : null;
               return { staff: finalStaffList, currentUser: updatedUser };
             });

@@ -107,21 +107,32 @@ async function refreshStaffFromSheets(): Promise<Staff[]> {
     if (staffRows.length > 0) {
       const mappedStaff: Staff[] = staffRows
         .filter((r: any) => (r.name && String(r.name).trim()) || (r.email && String(r.email).trim()))
-        .map((r: any) => ({
-          id: String(r.id || ""),
-          name: String(r.name || ""),
-          email: String(r.email || ""),
-          role: String(r.role || "Staff"),
-          status: (r.status || "Active") as "Active" | "Inactive",
-          access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
-          password: r.password ? String(r.password) : undefined,
-          passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
-          passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
-        }));
+        .map((r: any) => {
+          const rawName = String(r.name || "");
+          const rawEmail = String(r.email || "");
+          const isDefaultAdmin = rawName === "Avinash G" || rawEmail.toLowerCase() === "jainmobile7828@gmail.com" || String(r.id || "") === "ST-001";
+          const name = isDefaultAdmin ? "Rishi Rathod" : rawName;
+          return {
+            id: String(r.id || ""),
+            name,
+            email: rawEmail,
+            role: String(r.role || "Staff"),
+            status: (r.status || "Active") as "Active" | "Inactive",
+            access: (r.access || "Both") as "Finance" | "Mobiles" | "Both",
+            password: r.password ? String(r.password) : undefined,
+            passwordHash: r.passwordHash ? String(r.passwordHash) : undefined,
+            passwordSalt: r.passwordSalt ? String(r.passwordSalt) : undefined,
+          };
+        });
       if (mappedStaff.length > 0) {
-        const hasDefaultAdmin = mappedStaff.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com");
+        const hasDefaultAdmin = mappedStaff.some((s) => s.email.toLowerCase() === "jainmobile7828@gmail.com" || s.id === "ST-001");
         const finalStaff = hasDefaultAdmin ? mappedStaff : [seedStaff[0], ...mappedStaff];
-        useStore.setState({ staff: finalStaff });
+        useStore.setState((s) => {
+          const updatedUser = s.currentUser
+            ? finalStaff.find((m) => m.id === s.currentUser?.id || m.email.toLowerCase() === s.currentUser?.email?.toLowerCase()) || (s.currentUser.name === "Avinash G" ? { ...s.currentUser, name: "Rishi Rathod" } : s.currentUser)
+            : null;
+          return { staff: finalStaff, currentUser: updatedUser };
+        });
         return finalStaff;
       }
     }
