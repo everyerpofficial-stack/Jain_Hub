@@ -173,16 +173,7 @@ function CustomerDialog() {
   const [noOfEmi, setNoOfEmi] = useState("6");
   const [billDate, setBillDate] = useState(getTodayYmd());
   const [emiDate, setEmiDate] = useState(getTodayYmd());
-  const [fileChargeVal, setFileChargeVal] = useState("");
-
-  // Auto-calculate file charge (10% of price) when price changes
-  useEffect(() => {
-    if (price) {
-      setFileChargeVal(Math.round(Number(price) * 0.1).toString());
-    } else {
-      setFileChargeVal("");
-    }
-  }, [price]);
+  const [fileChargeVal, setFileChargeVal] = useState("1000");
 
   // File Upload states
   const [aadhaarFile, setAadhaarFile] = useState<{ name: string; url: string; size: string } | undefined>(undefined);
@@ -197,7 +188,7 @@ function CustomerDialog() {
       setPrice(""); setDeposit(""); setInterestRate("5"); setNoOfEmi("6");
       setBillDate(getTodayYmd());
       setEmiDate(getTodayYmd());
-      setFileChargeVal("");
+      setFileChargeVal("1000");
       setAadhaarFile(undefined); setPhotoFile(undefined);
     }
   }, [open]);
@@ -392,7 +383,7 @@ function CustomerDialog() {
 
             <Field label="Deposit (₹)" value={deposit} onChange={setDeposit} type="number" placeholder="2000" />
 
-            <Field label="File Charge (₹)" value={fileChargeVal} onChange={setFileChargeVal} type="number" placeholder="Defaults to 10%" />
+            <Field label="File Charge (₹)" value={fileChargeVal} onChange={setFileChargeVal} type="number" placeholder="1000" />
 
             {/* Balance for EMI — auto calculated */}
             <div className="flex items-center justify-between h-9 px-3 rounded-md border border-border bg-surface text-sm">
@@ -503,6 +494,7 @@ function CollectDialog() {
   const [customCollectorName, setCustomCollectorName] = useState("");
   const [remarks, setRemarks] = useState("");
   const [date, setDate] = useState(getTodayYmd());
+  const [discount, setDiscount] = useState("");
 
   const customer = customers.find((c) => c.id === customerId);
 
@@ -518,6 +510,7 @@ function CollectDialog() {
       }
       setRemarks("");
       setDate(getTodayYmd());
+      setDiscount("");
       setCollector(currentUser?.name || staff[0]?.name || "Rishi Rathod");
       setCustomCollectorName("");
       setMethod("Cash");
@@ -596,7 +589,10 @@ function CollectDialog() {
             </div>
           )}
 
-          <Field label="Payment Amount (₹)" value={amount} onChange={handleAmountChange} type="number" highlight />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Payment Amount (₹)" value={amount} onChange={handleAmountChange} type="number" highlight />
+            <Field label="Discount (₹)" value={discount} onChange={setDiscount} type="number" placeholder="0 (optional)" />
+          </div>
           
           <div className="grid grid-cols-2 gap-3">
             <Select label="Payment Mode" value={method} onChange={handleMethodChange} options={["Cash", "Bank", "Cash & Bank"]} />
@@ -646,7 +642,7 @@ function CollectDialog() {
                 ? `${remarks ? remarks + " " : ""}[Cash: ₹${cashAmount} | Bank: ₹${bankAmount}]`
                 : remarks;
               recordPayment({
-                customerId, amount: Number(amount), method: method as Payment["method"], collector: activeCollector, remarks: finalRemarks, date,
+                customerId, amount: Number(amount), discount: Number(discount) || 0, method: method as Payment["method"], collector: activeCollector, remarks: finalRemarks, date,
                 cashAmount: method === "Cash & Bank" ? Number(cashAmount) || 0 : undefined,
                 bankAmount: method === "Cash & Bank" ? Number(bankAmount) || 0 : undefined,
               });

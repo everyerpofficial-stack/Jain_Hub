@@ -5,7 +5,7 @@ import { Plus, Download, Search, Phone, MessageCircle, Eye, X, Printer, FileText
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
-import { downloadExcel, useStore, type Customer, type AppDocument, REGIONS, VILLAGES, MOBILE_BRANDS, RAM_ROM_OPTIONS, INTEREST_OPTIONS, EMI_COUNT_OPTIONS, calcEmi, parseAppDate, isDateInRange } from "@/lib/store";
+import { downloadExcel, useStore, type Customer, type AppDocument, REGIONS, VILLAGES, MOBILE_BRANDS, RAM_ROM_OPTIONS, INTEREST_OPTIONS, EMI_COUNT_OPTIONS, calcEmi, parseAppDate, parseAmount, isDateInRange } from "@/lib/store";
 import { useUi } from "@/components/AppDialogs";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -89,6 +89,8 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
 
   const paidAmount = (customer.paidEmis || 0) * (customer.perMonthEmi || 0);
   const progressPercent = (customer.noOfEmi || 0) > 0 ? Math.round(((customer.paidEmis || 0) / customer.noOfEmi) * 100) : 0;
+
+  const totalDiscountTaken = cPayments.reduce((sum, p) => sum + parseAmount(p.discount || "0"), 0);
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
@@ -297,14 +299,18 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2 text-xs border-t border-border/40">
+                <div className="grid grid-cols-3 gap-3 pt-2 text-xs border-t border-border/40">
                   <div>
                     <span className="text-muted-foreground block">Total Collected:</span>
                     <span className="font-bold text-success text-sm">{formatInr(paidAmount)}</span>
                   </div>
                   <div>
+                    <span className="text-muted-foreground block">Overall Discount:</span>
+                    <span className="font-bold text-warning text-sm">{formatInr(totalDiscountTaken)}</span>
+                  </div>
+                  <div>
                     <span className="text-muted-foreground block">Outstanding Balance:</span>
-                    <span className="font-bold text-warning text-sm">{formatInr(customer.pendingAmount)}</span>
+                    <span className="font-bold text-danger text-sm">{formatInr(customer.pendingAmount)}</span>
                   </div>
                 </div>
                 {customer.pendingEmis > 0 && (
@@ -397,6 +403,7 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                       <th className="py-2.5 px-4 font-semibold">Collector</th>
                       <th className="py-2.5 px-4 font-semibold">Method</th>
                       <th className="py-2.5 px-4 font-semibold">Remarks</th>
+                      <th className="py-2.5 px-4 font-semibold text-right">Discount</th>
                       <th className="py-2.5 px-4 font-semibold text-right">Amount Paid</th>
                     </tr>
                   </thead>
@@ -410,6 +417,7 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                           <Badge tone="info">{p.method}</Badge>
                         </td>
                         <td className="py-2.5 px-4 text-muted-foreground italic truncate max-w-[150px]" title={p.remarks}>{p.remarks || "—"}</td>
+                        <td className="py-2.5 px-4 text-right font-semibold text-warning">{p.discount || "—"}</td>
                         <td className="py-2.5 px-4 text-right font-bold text-success">{p.amount}</td>
                       </tr>
                     ))}

@@ -181,6 +181,7 @@ export type Payment = {
   customerId: string;
   date: string;
   amount: string;
+  discount?: string;
   pending: string;
   collector: string;
   method: "Cash" | "UPI" | "Bank" | "Cash & Bank";
@@ -404,7 +405,7 @@ export function calcEmi(priceInput: number, depositInput: number, interestRateIn
   const noOfEmi = Math.max(0, noOfEmiInput || 0);
   const fileCharge = customFileCharge !== undefined && !isNaN(customFileCharge)
     ? Math.max(0, customFileCharge)
-    : Math.round(price * 0.1);
+    : 1000;
 
   const balance = Math.max(0, price - deposit);
   const interestPerMonth = Math.round((balance * interestRate) / 100);
@@ -720,7 +721,7 @@ type State = {
   }) => Customer | undefined;
   addLoan: (input: { customer: string; amount: number; deposit: number; interest: number; months: number; date?: string; product?: string }) => Loan;
   collectLoanPayment: (input: { loanId: string; amount: number; method: Payment["method"]; collector?: string; remarks?: string; date?: string }) => void;
-  recordPayment: (input: { customerId: string; amount: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => void;
+  recordPayment: (input: { customerId: string; amount: number; discount?: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => void;
   collectEmi: (input: { collectionId: string; method: Collection["method"] }) => void;
   receiveCustomPayment: (input: { customer: string; amount: number; method: Payment["method"]; collector: string }) => void;
   addExpense: (input: { cat: string; desc: string; amount: number; type?: "Income" | "Expense"; date?: string; method?: Expense["method"] }) => Expense;
@@ -828,7 +829,7 @@ export function auditFromRow(r: SheetRow): AuditEntry {
 export function paymentRow(p: Payment): SheetRow {
   return {
     id: p.id, customer: p.customer, customerId: p.customerId || "",
-    amount: p.amount, method: p.method,
+    amount: p.amount, discount: p.discount || "", method: p.method,
     cashAmount: p.cashAmount ?? "", bankAmount: p.bankAmount ?? "",
     date: p.date, collector: p.collector, remarks: p.remarks || "",
     pending: p.pending || "", status: p.status || "Success",
@@ -1675,7 +1676,7 @@ export const useStore = create<State>()(
         return updated;
       },
 
-      recordPayment: ({ customerId, amount, method, collector, remarks, date, cashAmount, bankAmount }) => {
+      recordPayment: ({ customerId, amount, discount, method, collector, remarks, date, cashAmount, bankAmount }) => {
         const cust = get().customers.find((c) => c.id === customerId);
         if (!cust) return;
         const txnId = nextSeqId("TXN-", get().payments.map((x) => x.id));
@@ -1686,6 +1687,7 @@ export const useStore = create<State>()(
           newPendingEmis === 0 ? "Closed" : cust.status;
         const pDate = date ? formatDateToInr(date) : today();
         const nextEmiDate = advanceEmiDate(cust.emiDate);
+        const formattedDiscount = discount && discount > 0 ? fmtInr(discount) : undefined;
         set((s) => ({
           customers: recalculateStatuses(s.customers.map((c) =>
             c.id === customerId
@@ -1706,15 +1708,15 @@ export const useStore = create<State>()(
             c.customerId === customerId ? { ...c, state: "Collected" as const, method } : c
           ),
           payments: [
-            { id: txnId, customer: cust.name, customerId, date: pDate, amount: fmtInr(amount), pending: fmtInr(newPendingAmount), collector, method, cashAmount, bankAmount, status: "Success", remarks },
+            { id: txnId, customer: cust.name, customerId, date: pDate, amount: fmtInr(amount), discount: formattedDiscount, pending: fmtInr(newPendingAmount), collector, method, cashAmount, bankAmount, status: "Success", remarks },
             ...s.payments,
           ],
           notifications: [
-            { id: "N" + Date.now(), type: "Payment", text: `${fmtInr(amount)} received from ${cust.name}`, time: "just now", tone: "success" },
+            { id: "N" + Date.now(), type: "Payment", text: `${fmtInr(amount)}${formattedDiscount ? ` (Discount: ${formattedDiscount})` : ""} received from ${cust.name}`, time: "just now", tone: "success" },
             ...s.notifications,
           ],
           audit: [
-            { ts: new Date().toLocaleString("en-IN"), user: collector, action: "Recorded payment", target: `${txnId} · ${fmtInr(amount)} from ${cust.name}` },
+            { ts: new Date().toLocaleString("en-IN"), user: collector, action: "Recorded payment", target: `${txnId} · ${fmtInr(amount)}${formattedDiscount ? ` (Discount: ${formattedDiscount})` : ""} from ${cust.name}` },
             ...s.audit,
           ],
         }));

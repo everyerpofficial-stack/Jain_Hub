@@ -219,6 +219,10 @@ function Dashboard() {
     return isDateInRange(parseAppDate(i.maturity), startDate, endDate);
   }).reduce((s, i) => s + parseAmount(i.amount), 0);
 
+  const totalDiscount     = filteredPayments
+    .filter((p) => p.status === "Success")
+    .reduce((s, p) => s + parseAmount(p.discount || "0"), 0);
+
   const periodPaymentCount = filteredPayments.length;
   const periodCollection  = filteredPayments
     .filter((p) => p.status === "Success")
@@ -316,11 +320,12 @@ function Dashboard() {
       </div>
 
       {/* Secondary stats */}
-      <div className={`grid grid-cols-2 ${isAdmin ? "md:grid-cols-4" : "md:grid-cols-2"} gap-4 mb-6`}>
-        <StatCard label="File Charge Income" value={fmt(totalFileCharge)} sub="10% of selling price" />
+      <div className={`grid grid-cols-2 ${isAdmin ? "lg:grid-cols-5" : "md:grid-cols-3"} gap-4 mb-6`}>
+        <StatCard label="File Charge Income" value={fmt(totalFileCharge)} sub="Standard file fee" />
         {isAdmin && (
           <StatCard label="Interest Income" value={fmt(collectedInterest)} sub="Realised in period" />
         )}
+        <StatCard label="Total Discount" value={fmt(totalDiscount)} sub={`${filteredPayments.filter(p => p.status === "Success" && (parseAmount(p.discount || "0") || 0) > 0).length} discounted payments`} trend="warn" />
         <StatCard label="Total Expenses" value={fmt(totalExpenses)} sub={`${filteredExpenses.length} entries`} trend="warn" />
         {isAdmin && (
           <StatCard label="Total Investment" value={fmt(totalInvestment)} sub={`${investments.filter(i => filterPreset === "all" ? true : isDateInRange(parseAppDate(i.maturity), startDate, endDate)).length} investors`} />

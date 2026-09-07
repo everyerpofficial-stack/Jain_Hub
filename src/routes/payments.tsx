@@ -165,6 +165,7 @@ function PaymentsPage() {
                 <th className="text-left font-medium px-4 py-2.5 w-[130px]">Date</th>
                 <th className="text-left font-medium px-4 py-2.5 w-[110px]">Method</th>
                 <th className="text-left font-medium px-4 py-2.5 w-[130px]">Collector</th>
+                <th className="text-right font-medium px-4 py-2.5 w-[110px]">Discount</th>
                 <th className="text-right font-medium px-4 py-2.5 w-[120px]">Amount paid</th>
                 <th className="text-right font-medium px-4 py-2.5 w-[120px]">Pending</th>
                 <th className="text-left font-medium px-5 py-2.5 w-[110px]">Status</th>
@@ -175,7 +176,7 @@ function PaymentsPage() {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={currentUser?.role?.toLowerCase() === "admin" ? 9 : 8} className="px-5 py-10 text-center text-muted-foreground">No payments match.</td></tr>
+                <tr><td colSpan={currentUser?.role?.toLowerCase() === "admin" ? 10 : 9} className="px-5 py-10 text-center text-muted-foreground">No payments match.</td></tr>
               ) : filtered.map((p) => (
                 <tr key={p.id} className="border-t border-border hover:bg-accent/40">
                   <td className="px-5 py-3 font-medium text-xs w-[100px] truncate">{p.id}</td>
@@ -183,6 +184,7 @@ function PaymentsPage() {
                   <td className="px-4 py-3 text-muted-foreground w-[130px] truncate">{p.date}</td>
                   <td className="px-4 py-3 w-[110px] truncate">{p.method}</td>
                   <td className="px-4 py-3 text-muted-foreground w-[130px] truncate">{p.collector}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-warning w-[110px] truncate">{p.discount || "—"}</td>
                   <td className="px-4 py-3 text-right font-medium w-[120px] truncate">{p.amount}</td>
                   <td className="px-4 py-3 text-right text-muted-foreground w-[120px] truncate">{p.pending}</td>
                   <td className="px-5 py-3 w-[110px]"><Badge tone={p.status === "Success" ? "success" : "danger"}>{p.status}</Badge></td>
