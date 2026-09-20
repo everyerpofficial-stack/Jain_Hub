@@ -426,44 +426,108 @@ export function calculateEmi(principal: number, monthlyRatePct: number, months: 
   return (principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
 }
 
-// ---- EMI Date Advancement Helpers ----
-export function advanceEmiDate(input: string): string {
-  // A date cell that Sheets stored as a number/Date arrives here as a
-  // non-string. `.match()` on it threw inside recalculateStatuses(), which
-  // runs on every customer registration and payment — the throw escaped the
-  // click handler, so the record was never saved and the dialog never closed.
-  const dateStr = typeof input === "string" ? input : String(input ?? "");
-  if (!dateStr) return "";
-  // Check if it's YYYY-MM-DD
-  const ymdMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (ymdMatch) {
-    const y = parseInt(ymdMatch[1], 10);
-    const m = parseInt(ymdMatch[2], 10) - 1; // 0-indexed
-    const d = parseInt(ymdMatch[3], 10);
-    const date = new Date(y, m + 1, d); // add 1 month
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+// ---- Shared Date Utilities ----
+export function parseAppDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const cleaned = dateStr.trim();
+  if (!cleaned) return null;
+  
+  // Format: YYYY-MM-DD
+  const ymd = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return isNaN(d.getTime()) ? null : d;
   }
-
-  // Check if it's DD MMM YYYY (e.g., "19 Jun 2026")
-  const dmyMatch = dateStr.match(/^(\d{2})\s+([a-zA-Z]{3})\s+(\d{4})$/);
-  if (dmyMatch) {
-    const day = parseInt(dmyMatch[1], 10);
-    const monthAbbrs = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthIdx = monthAbbrs.indexOf(dmyMatch[2]);
-    const year = parseInt(dmyMatch[3], 10);
-    if (monthIdx !== -1) {
-      const date = new Date(year, monthIdx + 1, day); // add 1 month
-      const nextDay = String(date.getDate()).padStart(2, '0');
-      const nextMonth = monthAbbrs[date.getMonth()];
-      const nextYear = date.getFullYear();
-      return `${nextDay} ${nextMonth} ${nextYear}`;
+  
+  // Format: DD MMM YYYY (e.g. "18 Jun 2026", "20 Sept 2026", "20 September 2026")
+  const parts = cleaned.split(/\s+/);
+  if (parts.length === 3 && parts[1]) {
+    const day = parseInt(parts[0], 10);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthIdx = months.findIndex(m => m.toLowerCase() === parts[1].toLowerCase().substring(0, 3));
+    const year = parseInt(parts[2], 10);
+    if (!isNaN(day) && monthIdx !== -1 && !isNaN(year)) {
+      return new Date(year, monthIdx, day);
     }
   }
 
-  return dateStr; // fallback
+  // Format: DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = cleaned.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    return new Date(year, month, day);
+  }
+  
+  const parsed = new Date(cleaned);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function isDateInRange(date: Date | null, start: Date | null, end: Date | null): boolean {
+  if (!date) return false;
+  const dTime = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  
+  if (start) {
+    const sTime = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+    if (dTime < sTime) return false;
+  }
+  
+  if (end) {
+    const eTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+    if (dTime > eTime) return false;
+  }
+  
+  return true;
+}
+
+// ---- EMI Date Advancement & Retreat Helpers ----
+export function advanceEmiDate(input: string): string {
+  const dateStr = typeof input === "string" ? input.trim() : String(input ?? "").trim();
+  if (!dateStr) return "";
+
+  const parsed = parseAppDate(dateStr);
+  if (!parsed) return dateStr;
+
+  const targetDay = parsed.getDate();
+  const nextDate = new Date(parsed.getFullYear(), parsed.getMonth() + 1, targetDay);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const year = nextDate.getFullYear();
+    const month = String(nextDate.getMonth() + 1).padStart(2, "0");
+    const day = String(nextDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const monthAbbrs = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = String(nextDate.getDate()).padStart(2, "0");
+  const month = monthAbbrs[nextDate.getMonth()];
+  const year = nextDate.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
+export function retreatEmiDate(input: string): string {
+  const dateStr = typeof input === "string" ? input.trim() : String(input ?? "").trim();
+  if (!dateStr) return "";
+
+  const parsed = parseAppDate(dateStr);
+  if (!parsed) return dateStr;
+
+  const targetDay = parsed.getDate();
+  const prevDate = new Date(parsed.getFullYear(), parsed.getMonth() - 1, targetDay);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const year = prevDate.getFullYear();
+    const month = String(prevDate.getMonth() + 1).padStart(2, "0");
+    const day = String(prevDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const monthAbbrs = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = String(prevDate.getDate()).padStart(2, "0");
+  const month = monthAbbrs[prevDate.getMonth()];
+  const year = prevDate.getFullYear();
+  return `${day} ${month} ${year}`;
 }
 
 export function formatDateToInr(ymd: string): string {
@@ -2991,102 +3055,6 @@ export function parseAmount(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-// ---- Shared Date Utilities ----
-export function parseAppDate(dateStr: string | null | undefined): Date | null {
-  if (!dateStr || typeof dateStr !== "string") return null;
-  const cleaned = dateStr.trim();
-  if (!cleaned) return null;
-  
-  // Format: YYYY-MM-DD
-  // Built from parts rather than `new Date(cleaned)`: the string form is
-  // parsed as UTC midnight, which resolves to the PREVIOUS day in any
-  // negative-offset timezone. Every other branch below already builds a
-  // local date, so this one was the odd one out and made date-range filters
-  // disagree with themselves depending on the input format.
-  const ymd = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (ymd) {
-    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
-    return isNaN(d.getTime()) ? null : d;
-  }
-  
-  // Format: DD MMM YYYY (e.g. "18 Jun 2026")
-  const parts = cleaned.split(/\s+/);
-  if (parts.length === 3 && parts[1]) {
-    const day = parseInt(parts[0], 10);
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthIdx = months.findIndex(m => m.toLowerCase() === parts[1].toLowerCase().substring(0, 3));
-    const year = parseInt(parts[2], 10);
-    if (!isNaN(day) && monthIdx !== -1 && !isNaN(year)) {
-      return new Date(year, monthIdx, day);
-    }
-  }
-
-  // Format: DD-MM-YYYY or DD/MM/YYYY
-  const dmyMatch = cleaned.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
-  if (dmyMatch) {
-    const day = parseInt(dmyMatch[1], 10);
-    const month = parseInt(dmyMatch[2], 10) - 1;
-    const year = parseInt(dmyMatch[3], 10);
-    return new Date(year, month, day);
-  }
-  
-  const parsed = new Date(cleaned);
-  return isNaN(parsed.getTime()) ? null : parsed;
-}
-
-export function isDateInRange(date: Date | null, start: Date | null, end: Date | null): boolean {
-  if (!date) return false;
-  const dTime = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-  
-  if (start) {
-    const sTime = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
-    if (dTime < sTime) return false;
-  }
-  
-  if (end) {
-    const eTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
-    if (dTime > eTime) return false;
-  }
-  
-  return true;
-}
-
-export function retreatEmiDate(input: string): string {
-  const dateStr = typeof input === "string" ? input : String(input ?? "");
-  if (!dateStr) return "";
-  
-  // Check if YYYY-MM-DD
-  const ymdMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (ymdMatch) {
-    const y = parseInt(ymdMatch[1], 10);
-    const m = parseInt(ymdMatch[2], 10) - 1; // 0-indexed
-    const d = parseInt(ymdMatch[3], 10);
-    const date = new Date(y, m - 1, d); // subtract 1 month
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
-  // Check if DD MMM YYYY (e.g., "19 Jun 2026")
-  const dmyMatch = dateStr.match(/^(\d{2})\s+([a-zA-Z]{3})\s+(\d{4})$/);
-  if (dmyMatch) {
-    const day = parseInt(dmyMatch[1], 10);
-    const monthAbbrs = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthIdx = monthAbbrs.indexOf(dmyMatch[2]);
-    const year = parseInt(dmyMatch[3], 10);
-    if (monthIdx !== -1) {
-      const date = new Date(year, monthIdx - 1, day); // subtract 1 month
-      const nextDay = String(date.getDate()).padStart(2, '0');
-      const nextMonth = monthAbbrs[date.getMonth()];
-      const nextYear = date.getFullYear();
-      return `${nextDay} ${nextMonth} ${nextYear}`;
-    }
-  }
-
-  return dateStr;
-}
-
 export function getOriginalEmiStartDate(emiDateStr: string, paidEmis: number): string {
   let date = emiDateStr;
   for (let i = 0; i < paidEmis; i++) {
@@ -3112,13 +3080,19 @@ export function getMissedEmisCount(emiDateStr: string, paidEmis: number, noOfEmi
     const parsedDue = parseAppDate(currentDueDate);
     if (parsedDue) {
       const dueZero = new Date(parsedDue.getFullYear(), parsedDue.getMonth(), parsedDue.getDate());
-      if (dueZero <= todayZero) {
+      // An EMI instalment is missed only after its due date has already passed.
+      // On the due date itself, the customer is expected to pay today and is not yet overdue.
+      if (dueZero < todayZero) {
         emisExpected++;
       } else {
         break;
       }
     }
-    currentDueDate = advanceEmiDate(currentDueDate);
+    const nextDueDate = advanceEmiDate(currentDueDate);
+    if (!nextDueDate || nextDueDate === currentDueDate) {
+      break;
+    }
+    currentDueDate = nextDueDate;
   }
   
   return Math.max(0, emisExpected - paid);
