@@ -94,42 +94,52 @@ function BlacklistCustomerDialog({
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg p-0 overflow-hidden rounded-xl border border-border shadow-2xl z-[80]">
+      <DialogContent className="max-w-md w-[92vw] max-h-[85vh] p-0 flex flex-col overflow-hidden rounded-xl border border-border shadow-2xl z-[80] my-auto">
         {/* Header */}
-        <div className="p-6 bg-destructive text-destructive-foreground">
-          <div className="flex items-center gap-2 text-xs uppercase font-mono tracking-wider opacity-85">
-            <ShieldAlert className="size-4" /> Customer Blacklist
+        <div className="px-5 py-4 bg-destructive text-destructive-foreground shrink-0 flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-[11px] uppercase font-mono tracking-wider opacity-85">
+              <ShieldAlert className="size-3.5" /> Customer Blacklist
+            </div>
+            <DialogTitle className="text-lg font-bold mt-0.5 text-white">
+              {isAlreadyBlacklisted ? "Customer Blacklisted (Device Collected)" : "Send to Blacklist · Seize Mobile"}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-white/90 mt-0.5">
+              {isAlreadyBlacklisted
+                ? "This customer has already been marked as Blacklisted because the mobile handset was collected."
+                : "Marks that the customer has defaulted on EMIs and the mobile phone has been collected."}
+            </DialogDescription>
           </div>
-          <DialogTitle className="text-xl font-bold mt-1 text-white">
-            {isAlreadyBlacklisted ? "Customer Blacklisted (Device Collected)" : "Send to Blacklist · Seize Mobile"}
-          </DialogTitle>
-          <DialogDescription className="text-xs text-white/90 mt-1">
-            {isAlreadyBlacklisted
-              ? "This customer has already been marked as Blacklisted because the mobile handset was collected."
-              : "This action marks that the customer has defaulted on EMIs and the mobile phone has been collected from them."}
-          </DialogDescription>
+          <button
+            type="button"
+            onClick={onClose}
+            className="size-7 rounded-full border border-white/25 grid place-items-center hover:bg-white/15 transition-colors text-white ml-2 shrink-0"
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
 
-        <div className="p-6 space-y-4 bg-background">
+        {/* Scrollable Body */}
+        <div className="p-5 space-y-3 bg-background overflow-y-auto flex-1">
           {/* Customer & Device preview */}
-          <div className="p-4 rounded-lg bg-muted/40 border border-border/80 space-y-3 text-xs">
+          <div className="p-3 rounded-lg bg-muted/40 border border-border/80 space-y-2 text-xs">
             <div className="flex justify-between items-start pb-2 border-b border-border/50">
               <div>
-                <span className="text-muted-foreground block text-[11px]">Customer</span>
+                <span className="text-muted-foreground block text-[10px] uppercase font-medium">Customer</span>
                 <span className="font-bold text-sm text-foreground">{customer.name}</span>
-                <span className="text-muted-foreground block font-mono mt-0.5">{customer.mobile} · {customer.village}</span>
+                <span className="text-muted-foreground block font-mono text-[11px] mt-0.5">{customer.mobile} · {customer.village}</span>
               </div>
               <Badge tone={statusTone(customer.status)}>{customer.status}</Badge>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="grid grid-cols-2 gap-2 pt-0.5">
               <div>
-                <span className="text-muted-foreground block text-[11px]">Mobile Handset</span>
-                <span className="font-semibold text-foreground">{customer.mobileBrand} {customer.mobileModel}</span>
+                <span className="text-muted-foreground block text-[10px] uppercase font-medium">Mobile Handset</span>
+                <span className="font-semibold text-foreground text-xs">{customer.mobileBrand} {customer.mobileModel}</span>
                 <span className="text-muted-foreground block text-[10px]">{customer.ramRom}</span>
               </div>
               <div>
-                <span className="text-muted-foreground block text-[11px]">Pending Amount</span>
+                <span className="text-muted-foreground block text-[10px] uppercase font-medium">Pending Amount</span>
                 <span className="font-bold text-destructive text-sm">₹{(customer.pendingAmount || 0).toLocaleString("en-IN")}</span>
                 <span className="text-muted-foreground block text-[10px]">{customer.pendingEmis} EMIs remaining</span>
               </div>
@@ -142,7 +152,7 @@ function BlacklistCustomerDialog({
           </div>
 
           {isAlreadyBlacklisted ? (
-            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-xs space-y-2">
+            <div className="p-3.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs space-y-1.5">
               <div className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
                 <AlertTriangle className="size-4" /> Current Blacklist Record
               </div>
@@ -163,8 +173,8 @@ function BlacklistCustomerDialog({
                   type="text"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  placeholder="e.g. 20 Sep 2026"
-                  className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-destructive/30"
+                  placeholder="e.g. 21 Sep 2026"
+                  className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-destructive/30"
                 />
               </div>
 
@@ -173,16 +183,16 @@ function BlacklistCustomerDialog({
                   Reason & Collection Remarks
                 </label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="Enter remarks (e.g. Mobile collected due to unpaid EMIs, device condition, collected by, etc.)"
-                  className="w-full p-2.5 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-destructive/30"
+                  className="w-full p-2.5 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-destructive/30"
                 />
               </div>
 
-              <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
-                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+              <div className="p-2.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
                 <span>
                   Sending to blacklist sets customer status to <strong>Blacklisted</strong>, recording that the mobile has been collected. You can find them under the <strong>Blacklisted</strong> filter tab anytime.
                 </span>
@@ -192,11 +202,11 @@ function BlacklistCustomerDialog({
         </div>
 
         {/* Footer actions */}
-        <div className="p-4 border-t border-border bg-muted/20 flex items-center justify-between gap-3">
+        <div className="px-5 py-3 border-t border-border bg-muted/20 flex items-center justify-between gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="h-9 px-4 rounded-md border border-border bg-surface text-sm font-semibold hover:bg-accent transition-colors"
+            className="h-8 px-3 rounded-md border border-border bg-surface text-xs font-semibold hover:bg-accent transition-colors"
           >
             Cancel
           </button>
@@ -205,7 +215,7 @@ function BlacklistCustomerDialog({
             <button
               type="button"
               onClick={handleReinstate}
-              className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold hover:opacity-90 transition-opacity"
+              className="h-8 px-3.5 rounded-md bg-foreground text-background text-xs font-semibold hover:opacity-90 transition-opacity"
             >
               Reinstate / Remove from Blacklist
             </button>
@@ -214,9 +224,9 @@ function BlacklistCustomerDialog({
               type="button"
               disabled={isSubmitting}
               onClick={handleConfirmBlacklist}
-              className="h-9 px-4 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors inline-flex items-center gap-1.5 shadow"
+              className="h-8 px-3.5 rounded-md bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition-colors inline-flex items-center gap-1.5 shadow"
             >
-              <ShieldAlert className="size-4" /> Confirm & Send to Blacklist
+              <ShieldAlert className="size-3.5" /> Confirm & Send to Blacklist
             </button>
           )}
         </div>
