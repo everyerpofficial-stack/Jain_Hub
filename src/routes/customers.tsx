@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Plus, Download, Search, Phone, MessageCircle, Eye, X, Printer, FileText, User, MapPin, Smartphone, Landmark, ShieldCheck, History, Trash2 } from "lucide-react";
+import { Plus, Download, Search, Phone, MessageCircle, Eye, X, Printer, FileText, User, MapPin, Smartphone, Landmark, ShieldCheck, History, Trash2, ShieldAlert, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
@@ -30,20 +30,215 @@ export const Route = createFileRoute("/customers")({
   component: CustomersPage,
 });
 
-const STATUS_TABS = ["All", "Active", "Overdue", "Defaulted", "Closed"] as const;
+const STATUS_TABS = ["All", "Active", "Overdue", "Defaulted", "Closed", "Blacklisted"] as const;
 type StatusTab = typeof STATUS_TABS[number];
 
 function statusTone(s: string) {
-  return s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Defaulted" ? "danger" : s === "Closed" ? "neutral" : "neutral";
+  return s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Defaulted" ? "danger" : s === "Blacklisted" ? "danger" : s === "Closed" ? "neutral" : "neutral";
 }
 
-// Full detail card shown when a row is clicked
-// Full detail card shown when a row is clicked (Read-Only Profile & Payment History)
-function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: () => void }) {
+// Modal dialog to send a customer to the blacklist (device collected) or manage blacklist
+function BlacklistCustomerDialog({
+  customer,
+  onClose,
+}: {
+  customer: Customer | null;
+  onClose: () => void;
+}) {
+  const blacklistCustomer = useStore((s) => s.blacklistCustomer);
+  const removeFromBlacklist = useStore((s) => s.removeFromBlacklist);
+
+  const [date, setDate] = useState(() =>
+    new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+  );
+  const [reason, setReason] = useState("Mobile collected from customer due to unpaid EMIs");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (customer) {
+      setDate(
+        customer.blacklistDate ||
+          new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      );
+      setReason(
+        customer.blacklistReason ||
+          "Mobile collected from customer due to unpaid EMIs"
+      );
+    }
+  }, [customer]);
+
+  if (!customer) return null;
+
+  const isAlreadyBlacklisted = customer.status === "Blacklisted";
+
+  const handleConfirmBlacklist = () => {
+    setIsSubmitting(true);
+    try {
+      blacklistCustomer(customer.id, reason.trim(), date.trim());
+      toast.error(`${customer.name} sent to Blacklist (Mobile Collected)`, {
+        description: `Device: ${customer.mobileBrand} ${customer.mobileModel} collected on ${date}`,
+      });
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReinstate = () => {
+    if (confirm(`Remove ${customer.name} from Blacklist and restore active/pending status?`)) {
+      removeFromBlacklist(customer.id);
+      toast.success(`${customer.name} removed from Blacklist`);
+      onClose();
+    }
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg p-0 overflow-hidden rounded-xl border border-border shadow-2xl z-[80]">
+        {/* Header */}
+        <div className="p-6 bg-destructive text-destructive-foreground">
+          <div className="flex items-center gap-2 text-xs uppercase font-mono tracking-wider opacity-85">
+            <ShieldAlert className="size-4" /> Customer Blacklist
+          </div>
+          <DialogTitle className="text-xl font-bold mt-1 text-white">
+            {isAlreadyBlacklisted ? "Customer Blacklisted (Device Collected)" : "Send to Blacklist · Seize Mobile"}
+          </DialogTitle>
+          <DialogDescription className="text-xs text-white/90 mt-1">
+            {isAlreadyBlacklisted
+              ? "This customer has already been marked as Blacklisted because the mobile handset was collected."
+              : "This action marks that the customer has defaulted on EMIs and the mobile phone has been collected from them."}
+          </DialogDescription>
+        </div>
+
+        <div className="p-6 space-y-4 bg-background">
+          {/* Customer & Device preview */}
+          <div className="p-4 rounded-lg bg-muted/40 border border-border/80 space-y-3 text-xs">
+            <div className="flex justify-between items-start pb-2 border-b border-border/50">
+              <div>
+                <span className="text-muted-foreground block text-[11px]">Customer</span>
+                <span className="font-bold text-sm text-foreground">{customer.name}</span>
+                <span className="text-muted-foreground block font-mono mt-0.5">{customer.mobile} · {customer.village}</span>
+              </div>
+              <Badge tone={statusTone(customer.status)}>{customer.status}</Badge>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <span className="text-muted-foreground block text-[11px]">Mobile Handset</span>
+                <span className="font-semibold text-foreground">{customer.mobileBrand} {customer.mobileModel}</span>
+                <span className="text-muted-foreground block text-[10px]">{customer.ramRom}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[11px]">Pending Amount</span>
+                <span className="font-bold text-destructive text-sm">₹{(customer.pendingAmount || 0).toLocaleString("en-IN")}</span>
+                <span className="text-muted-foreground block text-[10px]">{customer.pendingEmis} EMIs remaining</span>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-border/40 font-mono text-[11px] text-muted-foreground flex flex-col gap-0.5">
+              <div>IMEI 1: <strong className="text-foreground">{customer.imei1 || "—"}</strong></div>
+              <div>IMEI 2: <strong className="text-foreground">{customer.imei2 || "—"}</strong></div>
+            </div>
+          </div>
+
+          {isAlreadyBlacklisted ? (
+            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-xs space-y-2">
+              <div className="font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                <AlertTriangle className="size-4" /> Current Blacklist Record
+              </div>
+              <p className="text-muted-foreground">
+                Device was collected on: <strong className="text-foreground">{customer.blacklistDate || "—"}</strong>
+              </p>
+              <p className="text-muted-foreground">
+                Reason / Remarks: <span className="text-foreground italic">"{customer.blacklistReason || "Mobile collected due to unpaid EMIs"}"</span>
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Device Collection Date
+                </label>
+                <input
+                  type="text"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  placeholder="e.g. 20 Sep 2026"
+                  className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-destructive/30"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Reason & Collection Remarks
+                </label>
+                <textarea
+                  rows={3}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Enter remarks (e.g. Mobile collected due to unpaid EMIs, device condition, collected by, etc.)"
+                  className="w-full p-2.5 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-destructive/30"
+                />
+              </div>
+
+              <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                <span>
+                  Sending to blacklist sets customer status to <strong>Blacklisted</strong>, recording that the mobile has been collected. You can find them under the <strong>Blacklisted</strong> filter tab anytime.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="p-4 border-t border-border bg-muted/20 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 px-4 rounded-md border border-border bg-surface text-sm font-semibold hover:bg-accent transition-colors"
+          >
+            Cancel
+          </button>
+
+          {isAlreadyBlacklisted ? (
+            <button
+              type="button"
+              onClick={handleReinstate}
+              className="h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold hover:opacity-90 transition-opacity"
+            >
+              Reinstate / Remove from Blacklist
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleConfirmBlacklist}
+              className="h-9 px-4 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors inline-flex items-center gap-1.5 shadow"
+            >
+              <ShieldAlert className="size-4" /> Confirm & Send to Blacklist
+            </button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CustomerDetailPanel({
+  c: customer,
+  onClose,
+  onOpenBlacklist,
+}: {
+  c: Customer;
+  onClose: () => void;
+  onOpenBlacklist: (c: Customer) => void;
+}) {
   const allPayments = useStore((s) => s.payments);
   const documents = useStore((s) => s.documents);
   const sendWhatsapp = useStore((s) => s.sendWhatsapp);
   const deleteCustomer = useStore((s) => s.deleteCustomer);
+  const removeFromBlacklist = useStore((s) => s.removeFromBlacklist);
   const deleteDocument = useStore((s) => s.deleteDocument);
   const currentUser = useStore((s) => s.currentUser);
   const { openDialog } = useUi();
@@ -103,8 +298,8 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
             </div>
             <DialogTitle className="text-2xl font-bold mt-0.5 text-background flex items-center gap-3">
               {customer.firstName} {customer.surname}
-              <Badge tone={customer.status === "Active" ? "success" : customer.status === "Overdue" ? "warning" : customer.status === "Defaulted" ? "danger" : "neutral"}>
-                {customer.status}
+              <Badge tone={statusTone(customer.status)}>
+                {customer.status === "Blacklisted" ? "Blacklisted · Mobile Collected" : customer.status}
               </Badge>
             </DialogTitle>
             <DialogDescription className="text-xs opacity-75 mt-1 text-background/85">
@@ -117,6 +312,37 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
         </div>
 
         <div className="p-6 space-y-6 bg-background/50">
+          {/* Blacklisted Alert Banner */}
+          {customer.status === "Blacklisted" && (
+            <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-destructive dark:text-red-300">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="size-5 text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-sm">Customer Blacklisted · Mobile Handset Collected</div>
+                  <p className="text-xs opacity-90 mt-0.5">
+                    The mobile device (<strong>{customer.mobileBrand} {customer.mobileModel}</strong>, IMEI: <code>{customer.imei1 || "—"}</code>) has been collected from this customer due to non-payment of EMIs.
+                  </p>
+                  <div className="text-[11px] opacity-80 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                    {customer.blacklistDate && <span>Collected on: <strong>{customer.blacklistDate}</strong></span>}
+                    {customer.blacklistReason && <span>Remarks: <em>{customer.blacklistReason}</em></span>}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`Reinstate ${customer.name} and remove from Blacklist?`)) {
+                    removeFromBlacklist(customer.id);
+                    toast.success(`${customer.name} removed from Blacklist`);
+                  }
+                }}
+                className="shrink-0 h-8 px-3 rounded-md bg-background text-foreground border border-border text-xs font-semibold hover:bg-accent transition-colors"
+              >
+                Reinstate Customer
+              </button>
+            </div>
+          )}
+
           {/* Main 3-column Grid for Details */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Column 1: Personal & Guarantor info */}
@@ -313,16 +539,40 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
                     <span className="font-bold text-danger text-sm">{formatInr(customer.pendingAmount)}</span>
                   </div>
                 </div>
-                {customer.pendingEmis > 0 && (
-                  <button
-                    onClick={() => {
-                      openDialog("collect", { customerId: customer.id });
-                    }}
-                    className="w-full mt-4 h-9 rounded-md bg-success text-white text-xs font-bold hover:bg-success/90 transition-all flex items-center justify-center gap-1.5 shadow"
-                  >
-                    Collect EMI Payment
-                  </button>
-                )}
+                <div className="space-y-2 mt-4">
+                  {customer.pendingEmis > 0 && (
+                    <button
+                      onClick={() => {
+                        openDialog("collect", { customerId: customer.id });
+                      }}
+                      className="w-full h-9 rounded-md bg-success text-white text-xs font-bold hover:bg-success/90 transition-all flex items-center justify-center gap-1.5 shadow"
+                    >
+                      Collect EMI Payment
+                    </button>
+                  )}
+                  {customer.status !== "Blacklisted" ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenBlacklist(customer)}
+                      className="w-full h-9 rounded-md border border-destructive/30 bg-destructive/10 text-destructive text-xs font-bold hover:bg-destructive hover:text-white transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <ShieldAlert className="size-3.5" /> Send to Blacklist (Mobile Collected)
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Reinstate ${customer.name} and remove from Blacklist?`)) {
+                          removeFromBlacklist(customer.id);
+                          toast.success(`${customer.name} removed from Blacklist`);
+                        }
+                      }}
+                      className="w-full h-9 rounded-md border border-border bg-surface text-foreground text-xs font-bold hover:bg-accent transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      Reinstate / Remove from Blacklist
+                    </button>
+                  )}
+                </div>
               </div>
             </Card>
           </div>
@@ -429,21 +679,45 @@ function CustomerDetailPanel({ c: customer, onClose }: { c: Customer; onClose: (
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-border bg-surface flex justify-between gap-2">
-          {currentUser?.role?.toLowerCase() === "admin" && (
-            <button
-              onClick={() => {
-                if (confirm(`Are you sure you want to delete ${customer.name}? This will also delete all associated loans, payments, and documents.`)) {
-                  deleteCustomer(customer.id);
-                  toast.success(`Deleted customer ${customer.name}`);
-                  onClose();
-                }
-              }}
-              className="h-9 px-4 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors"
-            >
-              Delete Customer
-            </button>
-          )}
+        <div className="p-4 border-t border-border bg-surface flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-2">
+            {currentUser?.role?.toLowerCase() === "admin" && (
+              <button
+                onClick={() => {
+                  if (confirm(`Are you sure you want to delete ${customer.name}? This will also delete all associated loans, payments, and documents.`)) {
+                    deleteCustomer(customer.id);
+                    toast.success(`Deleted customer ${customer.name}`);
+                    onClose();
+                  }
+                }}
+                className="h-9 px-4 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors"
+              >
+                Delete Customer
+              </button>
+            )}
+            {customer.status !== "Blacklisted" ? (
+              <button
+                type="button"
+                onClick={() => onOpenBlacklist(customer)}
+                className="h-9 px-4 rounded-md border border-destructive/30 bg-destructive/10 text-destructive text-sm font-semibold hover:bg-destructive hover:text-white transition-colors inline-flex items-center gap-1.5"
+              >
+                <ShieldAlert className="size-3.5" /> Blacklist (Mobile Collected)
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`Reinstate ${customer.name} and remove from Blacklist?`)) {
+                    removeFromBlacklist(customer.id);
+                    toast.success(`${customer.name} removed from Blacklist`);
+                  }
+                }}
+                className="h-9 px-4 rounded-md border border-border text-sm font-semibold hover:bg-accent transition-colors"
+              >
+                Remove from Blacklist
+              </button>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="h-9 px-4 rounded-md border border-border bg-surface text-sm font-semibold hover:bg-accent transition-colors ml-auto"
@@ -531,6 +805,7 @@ function CustomersPage() {
   const [q, setQ] = useState("");
   const [statusTab, setStatusTab] = useState<StatusTab>("All");
   const [selected, setSelected] = useState<Customer | null>(null);
+  const [blacklistTarget, setBlacklistTarget] = useState<Customer | null>(null);
 
   const {
     preset: filterPreset,
@@ -561,10 +836,26 @@ function CustomersPage() {
   const totalPending = filtered.reduce((s, c) => s + (c.pendingAmount || 0), 0);
   const totalCollected = filtered.reduce((s, c) => s + ((c.paidEmis || 0) * (c.perMonthEmi || 0)), 0);
   const overdue = filtered.filter((c) => c.status === "Overdue" || c.status === "Defaulted").length;
+  const blacklistedCount = filtered.filter((c) => c.status === "Blacklisted").length;
+
+  const liveSelected = selected ? customers.find((c) => c.id === selected.id) || selected : null;
+  const liveBlacklistTarget = blacklistTarget ? customers.find((c) => c.id === blacklistTarget.id) || blacklistTarget : null;
 
   return (
     <AppShell breadcrumb="Customers">
-      {selected && <CustomerDetailPanel c={selected} onClose={() => setSelected(null)} />}
+      {liveSelected && (
+        <CustomerDetailPanel
+          c={liveSelected}
+          onClose={() => setSelected(null)}
+          onOpenBlacklist={(cust) => setBlacklistTarget(cust)}
+        />
+      )}
+      {liveBlacklistTarget && (
+        <BlacklistCustomerDialog
+          customer={liveBlacklistTarget}
+          onClose={() => setBlacklistTarget(null)}
+        />
+      )}
 
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
@@ -582,6 +873,8 @@ function CustomersPage() {
                 "Monthly EMI": c.perMonthEmi, "No of EMI": c.noOfEmi,
                 "Paid EMIs": c.paidEmis, "Pending EMIs": c.pendingEmis,
                 "Pending Amount": c.pendingAmount, "EMI Date": c.emiDate, Status: c.status,
+                "Blacklist Date": c.blacklistDate || "—",
+                "Blacklist Reason": c.blacklistReason || "—",
               })));
               toast.success(`Exported ${filtered.length} customers`);
             }}
@@ -611,10 +904,11 @@ function CustomersPage() {
       />
 
       {/* Quick stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <StatCard label="Total Customers" value={filtered.length.toString()} sub="In selected period" />
         <StatCard label="Active" value={filtered.filter((c) => c.status === "Active").length.toString()} sub="On track" trend="up" />
         <StatCard label="Overdue / Defaulted" value={overdue.toString()} sub="Need follow-up" trend={overdue > 0 ? "down" : undefined} />
+        <StatCard label="Blacklisted" value={blacklistedCount.toString()} sub="Mobile Collected" trend={blacklistedCount > 0 ? "down" : undefined} />
         <StatCard label="Total Collected" value={`₹${Math.round(totalCollected / 1000)}K`} sub="In selected period" trend="up" />
       </div>
 
@@ -702,15 +996,19 @@ function CustomersPage() {
                   </td>
                   <td className="px-4 py-3 w-[120px]">
                     <Badge tone={statusTone(c.status)}>{c.status}</Badge>
-                    {c.missedEmis !== undefined && c.missedEmis > 0 && (
+                    {c.status === "Blacklisted" ? (
+                      <div className="text-[10px] text-destructive font-semibold mt-0.5 whitespace-nowrap flex items-center gap-1">
+                        <ShieldAlert className="size-3 shrink-0" /> Mobile Collected
+                      </div>
+                    ) : c.missedEmis !== undefined && c.missedEmis > 0 ? (
                       <div className="text-[10px] text-danger font-semibold mt-0.5 whitespace-nowrap">
                         {c.missedEmis} missed
                       </div>
-                    )}
+                    ) : null}
                   </td>
                   <td className="px-5 py-3 text-right w-[220px]" onClick={(e) => e.stopPropagation()}>
                     <div className="inline-flex gap-1">
-                      {(c.pendingEmis ?? 0) > 0 && (
+                      {(c.pendingEmis ?? 0) > 0 && c.status !== "Blacklisted" && (
                         <button
                           title="Collect Payment"
                           onClick={() => openDialog("collect", { customerId: c.id })}
@@ -725,6 +1023,17 @@ function CustomersPage() {
                         className="size-8 rounded-md border border-primary/10 bg-primary/5 text-primary grid place-items-center hover:bg-primary hover:text-primary-foreground transition-all duration-200 shadow-sm"
                       >
                         <Eye className="size-3.5" />
+                      </button>
+                      <button
+                        title={c.status === "Blacklisted" ? "Blacklisted (Mobile Collected) - Manage status" : "Send to Blacklist (Mobile Collected)"}
+                        onClick={() => setBlacklistTarget(c)}
+                        className={`size-8 rounded-md border grid place-items-center transition-all duration-200 shadow-sm ${
+                          c.status === "Blacklisted"
+                            ? "border-destructive/40 bg-destructive/15 text-destructive hover:bg-destructive hover:text-white"
+                            : "border-border/60 bg-surface text-muted-foreground hover:border-destructive/40 hover:text-destructive hover:bg-destructive/10"
+                        }`}
+                      >
+                        <ShieldAlert className="size-3.5" />
                       </button>
                       <button
                         title="WhatsApp reminder"

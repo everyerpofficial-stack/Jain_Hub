@@ -194,7 +194,7 @@ function DueListPage() {
     .reduce((s, c) => s + c.pendingAmount, 0);
 
   const tone = (s: string) =>
-    s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Defaulted" ? "danger" : "neutral";
+    s === "Active" ? "success" : s === "Overdue" ? "warning" : s === "Defaulted" ? "danger" : s === "Blacklisted" ? "danger" : "neutral";
 
   return (
     <AppShell breadcrumb="Due List">
@@ -295,6 +295,7 @@ function DueListPage() {
               { label: "Active", value: "Active" },
               { label: "Overdue", value: "Overdue" },
               { label: "Defaulted", value: "Defaulted" },
+              { label: "Blacklisted", value: "Blacklisted" },
             ]}
             selected={statusFilter}
             onChange={setStatusFilter}

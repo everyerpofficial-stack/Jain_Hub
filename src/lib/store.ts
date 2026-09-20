@@ -167,8 +167,10 @@ export type Customer = {
   pendingAmount: number;    // pendingEmis × perMonthEmi
   lastPaymentDate: string;
   lastPaymentAmt: number;
-  status: "Active" | "Overdue" | "Closed" | "Defaulted";
+  status: "Active" | "Overdue" | "Closed" | "Defaulted" | "Blacklisted";
   missedEmis?: number;
+  blacklistDate?: string;
+  blacklistReason?: string;
   // Legacy compat (used by old pages)
   loan: string;
   emi: string;
@@ -719,6 +721,8 @@ type State = {
     status: Customer["status"];
     fileCharge?: number;
   }) => Customer | undefined;
+  blacklistCustomer: (id: string, reason?: string, date?: string) => void;
+  removeFromBlacklist: (id: string) => void;
   addLoan: (input: { customer: string; amount: number; deposit: number; interest: number; months: number; date?: string; product?: string }) => Loan;
   collectLoanPayment: (input: { loanId: string; amount: number; method: Payment["method"]; collector?: string; remarks?: string; date?: string }) => void;
   recordPayment: (input: { customerId: string; amount: number; discount?: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => void;
@@ -762,6 +766,8 @@ export function customerRow(c: Customer): SheetRow {
     lastPaymentDate: c.lastPaymentDate || "—",
     lastPaymentAmt: c.lastPaymentAmt,
     status: c.status, missedEmis: c.missedEmis ?? 0,
+    blacklistDate: c.blacklistDate || "",
+    blacklistReason: c.blacklistReason || "",
     loan: c.loan || "", emi: c.emi || "", due: c.due || "",
   };
 }
@@ -1676,6 +1682,66 @@ export const useStore = create<State>()(
         return updated;
       },
 
+      blacklistCustomer: (id, reason, date) => {
+        const cust = get().customers.find((c) => c.id === id);
+        if (!cust) return;
+        const blacklistDate = date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+        const blacklistReason = reason || "Mobile collected due to unpaid EMIs";
+
+        const updated: Customer = {
+          ...cust,
+          status: "Blacklisted",
+          blacklistDate,
+          blacklistReason,
+        };
+
+        set((s) => ({
+          customers: s.customers.map((c) => (c.id === id ? updated : c)),
+          audit: [
+            {
+              ts: new Date().toLocaleString("en-IN"),
+              user: s.currentUser?.name || "System",
+              action: "Blacklisted customer (Mobile Collected)",
+              target: `${id} ${updated.name} - ${blacklistReason}`,
+            },
+            ...s.audit,
+          ],
+        }));
+
+        syncUpsert(get, "Finance_Customers", customerRow(updated), "customer blacklist");
+      },
+
+      removeFromBlacklist: (id) => {
+        const cust = get().customers.find((c) => c.id === id);
+        if (!cust) return;
+
+        const missed = getMissedEmisCount(cust.emiDate, cust.paidEmis, cust.noOfEmi);
+        const restoredStatus: Customer["status"] =
+          cust.pendingEmis === 0 ? "Closed" : missed === 0 ? "Active" : missed >= 3 ? "Defaulted" : "Overdue";
+
+        const updated: Customer = {
+          ...cust,
+          status: restoredStatus,
+          blacklistDate: undefined,
+          blacklistReason: undefined,
+        };
+
+        set((s) => ({
+          customers: s.customers.map((c) => (c.id === id ? updated : c)),
+          audit: [
+            {
+              ts: new Date().toLocaleString("en-IN"),
+              user: s.currentUser?.name || "System",
+              action: "Removed customer from Blacklist (Reinstated)",
+              target: `${id} ${updated.name}`,
+            },
+            ...s.audit,
+          ],
+        }));
+
+        syncUpsert(get, "Finance_Customers", customerRow(updated), "customer unblacklist");
+      },
+
       recordPayment: ({ customerId, amount, discount, method, collector, remarks, date, cashAmount, bankAmount }) => {
         const cust = get().customers.find((c) => c.id === customerId);
         if (!cust) return;
@@ -2136,6 +2202,8 @@ export const useStore = create<State>()(
             pendingAmount: Number(r.pendingAmount) || 0,
             lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
             missedEmis: Number(r.missedEmis) || 0,
+            blacklistDate: String(r.blacklistDate ?? ""),
+            blacklistReason: String(r.blacklistReason ?? ""),
           }));
           // An empty read is NOT proof the table is empty. Code.gs answers a
           // missing/renamed tab with {status:"ok", rows: []}, and a tab that has
@@ -3136,6 +3204,9 @@ export function recalculateLoanStatuses(loans: Loan[]): Loan[] {
 
 export function recalculateStatuses(customers: Customer[]): Customer[] {
   return customers.map((c) => {
+    if (c.status === "Blacklisted") {
+      return c;
+    }
     if (c.pendingEmis === 0) {
       return { ...c, status: "Closed" as const, missedEmis: 0 };
     }

@@ -444,6 +444,7 @@ function Dashboard() {
               { label: "Active", count: filteredCustomers.filter((c) => c.status === "Active").length, total: totalCustomers, color: "oklch(0.62 0.15 160)", tone: "success" as const },
               { label: "Overdue", count: filteredCustomers.filter((c) => c.status === "Overdue").length, total: totalCustomers, color: "oklch(0.78 0.16 70)", tone: "warning" as const },
               { label: "Defaulted", count: filteredCustomers.filter((c) => c.status === "Defaulted").length, total: totalCustomers, color: "oklch(0.6 0.22 25)", tone: "danger" as const },
+              { label: "Blacklisted", count: filteredCustomers.filter((c) => c.status === "Blacklisted").length, total: totalCustomers, color: "oklch(0.45 0.2 25)", tone: "danger" as const },
               { label: "Closed", count: filteredCustomers.filter((c) => c.status === "Closed").length, total: totalCustomers, color: "oklch(0.6 0.012 60)", tone: "neutral" as const },
             ].map((row) => (
               <div key={row.label}>

@@ -331,6 +331,8 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
           pendingAmount: Number(r.pendingAmount) || 0,
           lastPaymentAmt: Number(r.lastPaymentAmt) || 0,
           missedEmis: Number(r.missedEmis) || 0,
+          blacklistDate: String(r.blacklistDate ?? ""),
+          blacklistReason: String(r.blacklistReason ?? ""),
         }));
         safeReconcile(url, "Finance_Customers", sanitized, finState.customers, setFin, "customers", customerRow);
       }
