@@ -212,7 +212,9 @@ function Dashboard() {
     }, 0);
   
   const grossProfit       = totalFileCharge + collectedInterest;
-  const totalExpenses     = filteredExpenses.reduce((s, e) => s + parseAmount(e.amount), 0);
+  // "Income"-type register entries (capital, opening cash…) are not costs.
+  const expenseEntries    = filteredExpenses.filter((e) => e.type !== "Income");
+  const totalExpenses     = expenseEntries.reduce((s, e) => s + parseAmount(e.amount), 0);
   const netProfit         = grossProfit - totalExpenses;
   const totalInvestment   = investments.filter((i) => {
     if (filterPreset === "all") return true;
@@ -326,7 +328,7 @@ function Dashboard() {
           <StatCard label="Interest Income" value={fmt(collectedInterest)} sub="Realised in period" />
         )}
         <StatCard label="Total Discount" value={fmt(totalDiscount)} sub={`${filteredPayments.filter(p => p.status === "Success" && (parseAmount(p.discount || "0") || 0) > 0).length} discounted payments`} trend="warn" />
-        <StatCard label="Total Expenses" value={fmt(totalExpenses)} sub={`${filteredExpenses.length} entries`} trend="warn" />
+        <StatCard label="Total Expenses" value={fmt(totalExpenses)} sub={`${expenseEntries.length} entries`} trend="warn" />
         {isAdmin && (
           <StatCard label="Total Investment" value={fmt(totalInvestment)} sub={`${investments.filter(i => filterPreset === "all" ? true : isDateInRange(parseAppDate(i.maturity), startDate, endDate)).length} investors`} />
         )}

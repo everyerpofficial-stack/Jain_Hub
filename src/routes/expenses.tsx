@@ -85,23 +85,23 @@ function ExpensesPage() {
   const monthlyData = (() => {
     const data = [];
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const yearStr = referenceYear.toString();
     for (let i = 0; i < 12; i++) {
       const monthLabel = months[i];
+      // Match on the parsed date, not the date text: rows that came back from
+      // Google Sheets read as YYYY-MM-DD and never contained "jan", "feb"…
+      const inMonth = (d: Date | null) => !!d && d.getFullYear() === referenceYear && d.getMonth() === i;
 
       const monthIncome = expenses
         .filter((e) => {
-          const dateLower = String(e.date || "").toLowerCase();
           const pDate = parseAppDate(e.date);
-          return isIncome(e) && dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
+          return isIncome(e) && inMonth(pDate) && isDateInRange(pDate, startDate, endDate);
         })
         .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 
       const monthExpense = expenses
         .filter((e) => {
-          const dateLower = String(e.date || "").toLowerCase();
           const pDate = parseAppDate(e.date);
-          return !isIncome(e) && dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
+          return !isIncome(e) && inMonth(pDate) && isDateInRange(pDate, startDate, endDate);
         })
         .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 

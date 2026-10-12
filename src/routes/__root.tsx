@@ -8,6 +8,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { toast } from "sonner";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "@/components/ui/sonner";
@@ -170,11 +171,33 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const currentUser = useStore((s) => s.currentUser);
+  const staff = useStore((s) => s.staff);
+  const logout = useStore((s) => s.logout);
   const recheckStatuses = useStore((s) => s.recheckStatuses);
   const uploadPendingDocuments = useStore((s) => s.uploadPendingDocuments);
 
   // 🔄 Real-time bidirectional Google Sheets sync — polls every 30s
   useRealtimeSync();
+
+  // A session is only as good as the staff row behind it. Deactivating or
+  // deleting someone in Roles used to change nothing on a device where they
+  // were already signed in: the persisted session simply carried on. The
+  // poller keeps `staff` current, so end the session once the row is gone or
+  // no longer Active.
+  useEffect(() => {
+    if (!currentUser) return;
+    const email = String(currentUser.email || "").trim().toLowerCase();
+    const row = staff.find(
+      (m) => m.id === currentUser.id || String(m.email || "").trim().toLowerCase() === email
+    );
+    if (!row || row.status !== "Active") {
+      logout();
+      toast.error("You have been signed out", {
+        description: "This account was deactivated or removed by an administrator.",
+        duration: 10000,
+      });
+    }
+  }, [currentUser, staff, logout]);
 
   useEffect(() => {
     if (currentUser) {

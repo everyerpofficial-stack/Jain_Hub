@@ -5,9 +5,9 @@ import { safeLocalStorage } from "./safeStorage";
 import { formatDateToInr, parseAppDate, useStore } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, clearSheets, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
-import { enqueueWrite, markIdDeleted, clearSyncState } from "./syncQueue";
+import { enqueueWrite, markIdDeleted, clearSyncState, markLocallyCreated, isLocallyRecent } from "./syncQueue";
 import { resetRealtimeSyncCache } from "./useRealtimeSync";
-import { toOptionalNumber } from "./ledger";
+import { splitByMethod, toOptionalNumber } from "./ledger";
 
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   "TV": [
@@ -604,6 +604,25 @@ export function warrantyRow(w: MobileWarrantyClaim): SheetRow {
   };
 }
 
+/**
+ * Inverse of warrantyRow. The sheet columns are `mobile` / `issueDescription`
+ * but the app reads `customerMobile` / `issue`, and rows used to be cast
+ * straight into state — so after any sync every claim lost its phone number
+ * and its issue text.
+ */
+export function warrantyFromRow(r: Record<string, unknown>): MobileWarrantyClaim {
+  return {
+    id: String(r?.id ?? ""),
+    customerName: String(r?.customerName ?? ""),
+    customerMobile: String(r?.customerMobile ?? r?.mobile ?? ""),
+    productName: String(r?.productName ?? ""),
+    imei: String(r?.imei ?? ""),
+    claimDate: String(r?.claimDate ?? ""),
+    issue: String(r?.issue ?? r?.issueDescription ?? ""),
+    status: (r?.status || "Pending") as MobileWarrantyClaim["status"],
+  };
+}
+
 export function auditRow(a: MobileAuditEntry): SheetRow {
   const tsId = String(a.ts || "").replace(/[^a-zA-Z0-9]/g, "_");
   const actionId = String(a.action || "").replace(/[^a-zA-Z0-9]/g, "_");
@@ -882,8 +901,13 @@ export const useMobileStore = create<MobilesState>()(
           (s) => s.id === id || String(s?.name ?? "").trim().toLowerCase() === idKey
         );
         if (!supplier) return;
+
+        const newPaymentId = nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id));
+        markLocallyCreated("Mobiles_SupplierPayments", newPaymentId);
+        markLocallyCreated("Mobiles_Suppliers", supplier.id);
+
         const newPayment: SupplierPayment = {
-          id: nextSeqId("SPM-", (get().supplierPayments || []).map((x) => x.id)),
+          id: newPaymentId,
           supplierId: supplier.id,
           supplierName: supplier.name,
           amount,
@@ -893,15 +917,61 @@ export const useMobileStore = create<MobilesState>()(
           cashAmount,
           bankAmount,
         };
+
+        // Also allocate this payment across any of this supplier's outstanding credit purchases
+        let remainingPayAmt = amount;
+        const updatedPurchasesList = [...get().purchases];
+        const affectedPurchases: MobilePurchase[] = [];
+
+        const supPurchases = updatedPurchasesList
+          .filter(
+            (p) =>
+              (p.supplierId === supplier.id || (p.supplierName && p.supplierName.trim().toLowerCase() === supplier.name.trim().toLowerCase())) &&
+              p.status !== "Paid" &&
+              (Number(p.dueAmount) > 0 || Number(p.amountPaid) < Number(p.amount))
+          )
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.id.localeCompare(b.id));
+
+        for (const p of supPurchases) {
+          if (remainingPayAmt <= 0) break;
+          const curPaid = Number(p.amountPaid) || 0;
+          const curDue = p.dueAmount !== undefined ? Number(p.dueAmount) : Math.max(0, (Number(p.amount) || 0) - curPaid);
+          if (curDue <= 0) continue;
+
+          const allocated = Math.min(curDue, remainingPayAmt);
+          remainingPayAmt -= allocated;
+          const newPaid = curPaid + allocated;
+          const newDue = Math.max(0, (Number(p.amount) || 0) - newPaid);
+          const newStatus: "Paid" | "Partial Paid" | "Not Paid" = newDue <= 0 ? "Paid" : "Partial Paid";
+
+          const updatedPur: MobilePurchase = {
+            ...p,
+            amountPaid: newPaid,
+            dueAmount: newDue,
+            status: newStatus,
+            paymentStatus: newStatus,
+          };
+          affectedPurchases.push(updatedPur);
+          const idx = updatedPurchasesList.findIndex((item) => item.id === p.id);
+          if (idx !== -1) updatedPurchasesList[idx] = updatedPur;
+        }
+
         set((state) => ({
+          purchases: updatedPurchasesList,
           suppliers: state.suppliers.map((s) =>
             s.id === supplier.id ? { ...s, outstanding: Math.max(0, s.outstanding - amount) } : s
           ),
           supplierPayments: [newPayment, ...(state.supplierPayments || [])]
         }));
+
         syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment");
         const updatedSupplier = get().suppliers.find((s) => s.id === supplier.id);
         if (updatedSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier balance (from payment)");
+        affectedPurchases.forEach((ap) => {
+          markLocallyCreated("Mobiles_Purchases", ap.id);
+          syncUpsert(get, "Mobiles_Purchases", purchaseRow(ap), "purchase settlement (from supplier payment)");
+        });
+
         get().pushAudit({
           action: "Vendor Payment",
           target: `Paid ₹${amount.toLocaleString("en-IN")} to ${supplier.name} (${paymentMode})`,
@@ -1191,8 +1261,25 @@ export const useMobileStore = create<MobilesState>()(
         const newDueAmount = Math.max(0, (Number(sale.totalAmount) || 0) - newAmountPaid);
         const newPaymentStatus: MobileSale["paymentStatus"] = newDueAmount <= 0 ? "Full Paid" : "Partial Paid";
 
-        const updatedCashPaid = (sale.cashAmountPaid || 0) + (paymentMethod === "Cash" ? payAmt : 0);
-        const updatedUpiPaid = (sale.upiAmountPaid || 0) + (paymentMethod === "UPI" ? payAmt : 0);
+        // Start from what the bill has already taken in each mode. A plain Cash
+        // or UPI bill stores no split, and starting from 0 here dropped that
+        // first payment from the Cash & UPI flow the moment a balance was
+        // collected (the dashboard trusts the split once either side is set).
+        // Mirrors the read-side rule in CashFlowDashboard.
+        const storedCash = toOptionalNumber(sale.cashAmountPaid);
+        const storedUpi = toOptionalNumber(sale.upiAmountPaid);
+        let baseCash: number;
+        let baseUpi: number;
+        if (storedCash !== undefined || storedUpi !== undefined) {
+          baseCash = storedCash ?? Math.max(0, currentPaid - (storedUpi ?? 0));
+          baseUpi = storedUpi ?? Math.max(0, currentPaid - baseCash);
+        } else {
+          const split = splitByMethod(sale.paymentMethod, currentPaid);
+          baseCash = split.cash;
+          baseUpi = split.bank;
+        }
+        const updatedCashPaid = baseCash + (paymentMethod === "Cash" ? payAmt : 0);
+        const updatedUpiPaid = baseUpi + (paymentMethod === "UPI" ? payAmt : 0);
 
         set((state) => ({
           sales: state.sales.map((s) =>
@@ -1385,7 +1472,12 @@ export const useMobileStore = create<MobilesState>()(
           desc: input.desc,
           amount: `₹${Number(input.amount).toLocaleString("en-IN")}`,
           type: input.type || "Expense",
-          paymentMode: input.paymentMode || "Cash"
+          paymentMode: input.paymentMode || "Cash",
+          // The cash/UPI portions the user typed were dropped here, so every
+          // split entry (accessory sales included) fell back to a 50/50 guess
+          // in the Cash & UPI flow.
+          cashAmount: toOptionalNumber(input.cashAmount),
+          bankAmount: toOptionalNumber(input.bankAmount),
         };
         set((state) => ({
           expenses: [newExpense, ...state.expenses]
@@ -1464,17 +1556,22 @@ export const useMobileStore = create<MobilesState>()(
         if (!sheetsConfig.enabled || !sheetsConfig.url) {
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
+        // Skip tables that are empty on this device — writing [] clears the
+        // shared sheet (see the matching note in store.ts syncToSheets).
+        const push = async (sheet: SheetName, rows: SheetRow[]) => {
+          if (rows.length > 0) await writeSheet(sheetsConfig.url, sheet, rows);
+        };
         try {
-          await writeSheet(sheetsConfig.url, "Mobiles_Sales", sales.map(saleRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Purchases", purchases.map(purchaseRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Expenses", expenses.map(mobileExpenseRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Suppliers", suppliers.map(supplierRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_SupplierPayments", supplierPayments.map(supplierPaymentRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Customers", customers.map(mobileCustomerRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Products", products.map(productRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Accessories", accessories.map(accessoryRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_WarrantyClaims", warranties.map(warrantyRow));
-          await writeSheet(sheetsConfig.url, "Mobiles_Settings", [mobileSettingsRow(get().settings)]);
+          await push("Mobiles_Sales", sales.map(saleRow));
+          await push("Mobiles_Purchases", purchases.map(purchaseRow));
+          await push("Mobiles_Expenses", expenses.map(mobileExpenseRow));
+          await push("Mobiles_Suppliers", suppliers.map(supplierRow));
+          await push("Mobiles_SupplierPayments", (supplierPayments || []).map(supplierPaymentRow));
+          await push("Mobiles_Customers", customers.map(mobileCustomerRow));
+          await push("Mobiles_Products", products.map(productRow));
+          await push("Mobiles_Accessories", accessories.map(accessoryRow));
+          await push("Mobiles_WarrantyClaims", warranties.map(warrantyRow));
+          await push("Mobiles_Settings", [mobileSettingsRow(get().settings)]);
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
@@ -1524,7 +1621,14 @@ export const useMobileStore = create<MobilesState>()(
             set({ sales: sanitizedSales as unknown as MobileSale[] });
           }
 
-          if (expRows.length > 0 || get().expenses.length === 0) set({ expenses: expRows as unknown as MobileExpense[] });
+          // A blank split cell comes back as "", which the cash-flow ledger read
+          // as a real portion and then dropped the whole entry for being <= 0.
+          const sanitizedExpenses = expRows.map((r: any) => ({
+            ...r,
+            cashAmount: toOptionalNumber(r.cashAmount),
+            bankAmount: toOptionalNumber(r.bankAmount),
+          }));
+          if (expRows.length > 0 || get().expenses.length === 0) set({ expenses: sanitizedExpenses as unknown as MobileExpense[] });
           const sanitizedSuppliers = supRows.map((r: any) => ({
             ...r,
             name: String(r.name ?? ""),
@@ -1533,7 +1637,22 @@ export const useMobileStore = create<MobilesState>()(
             address: String(r.address ?? ""),
             outstanding: Number(r.outstanding) || 0,
           }));
-          if (supRows.length > 0 || get().suppliers.length === 0) set({ suppliers: sanitizedSuppliers as unknown as MobileSupplier[] });
+          if (supRows.length > 0 || get().suppliers.length === 0) {
+            const sheetSupMap = new Map(sanitizedSuppliers.map((s) => [String(s.id), s]));
+            const localSups = get().suppliers;
+            const merged = localSups.map((loc) => {
+              const rem = sheetSupMap.get(String(loc.id));
+              if (!rem) return loc;
+              if (isLocallyRecent("Mobiles_Suppliers", String(loc.id))) {
+                return { ...rem, outstanding: loc.outstanding };
+              }
+              return rem;
+            });
+            for (const s of sanitizedSuppliers) {
+              if (!merged.some((m) => m.id === s.id)) merged.push(s);
+            }
+            set({ suppliers: merged as unknown as MobileSupplier[] });
+          }
 
           // Sanitise supplier payments — paymentMode must survive the Sheets
           // round-trip or splitByMethod defaults every payment to bank/UPI.
@@ -1553,7 +1672,9 @@ export const useMobileStore = create<MobilesState>()(
             };
           });
           if (supPayRows.length > 0 || (get().supplierPayments || []).length === 0) {
-            set({ supplierPayments: sanitizedSupPayments as unknown as SupplierPayment[] });
+            const sheetIds = new Set(sanitizedSupPayments.map((p) => String(p.id)));
+            const localDrafts = (get().supplierPayments || []).filter((p) => !sheetIds.has(String(p.id)));
+            set({ supplierPayments: [...sanitizedSupPayments, ...localDrafts] });
           }
 
           const sanitizedCustomers = custRows.map((r: any) => ({
@@ -1634,7 +1755,7 @@ export const useMobileStore = create<MobilesState>()(
           }
 
           if (warRows.length > 0 || get().warranties.length === 0) {
-            set({ warranties: warRows as unknown as MobileWarrantyClaim[] });
+            set({ warranties: warRows.map(warrantyFromRow) });
           }
 
           const savedSettings = setRows.find((r: any) => String(r?.id) === MOBILE_SETTINGS_ROW_ID);

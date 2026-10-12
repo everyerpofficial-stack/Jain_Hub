@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   MOBILE_BRANDS, RAM_ROM_OPTIONS, INTEREST_OPTIONS, EMI_COUNT_OPTIONS,
-  REGIONS, calcEmi, calculateEmi, useStore, formatDateToInr, formatDateToYmd,
+  REGIONS, calcEmi, calculateEmi, useStore, formatDateToInr, formatDateToYmd, parseAmount,
   VILLAGES_BY_REGION, type Payment, type Expense, type Investment,
 } from "@/lib/store";
 import { readFileForStorage } from "@/lib/imageFile";
@@ -497,35 +497,47 @@ function CollectDialog() {
   const [discount, setDiscount] = useState("");
 
   const customer = customers.find((c) => c.id === customerId);
+  const isOpen = open === "collect" || open === "payment";
 
+  // Initialise ONCE per opening. This effect used to depend on `customers`,
+  // `staff` and `currentUser`, so any background sync while the dialog was
+  // open (the poller replaces those arrays every time another device saves
+  // anything) re-ran it: the selected customer snapped back to the prefill or
+  // the first pending customer and the typed amount/date/discount reset —
+  // and "Confirm Payment" then booked the money against the wrong account.
   useEffect(() => {
-    if (open === "collect" || open === "payment") {
-      const pid = prefill?.customerId || customers.find((c) => c.pendingEmis > 0)?.id || customers[0]?.id || "";
-      setCustomerId(pid);
-      const cust = customers.find((c) => c.id === pid);
-      if (cust) {
-        setAmount(cust.perMonthEmi.toString());
+    if (!isOpen) return;
+    const { customers: list, currentUser: me, staff: team } = useStore.getState();
+    const pid = prefill?.customerId || list.find((c) => c.pendingEmis > 0)?.id || list[0]?.id || "";
+    setCustomerId(pid);
+    const cust = list.find((c) => c.id === pid);
+    if (cust) {
+      setAmount(cust.perMonthEmi.toString());
+      setCashAmount(Math.floor(cust.perMonthEmi / 2));
+      setBankAmount(cust.perMonthEmi - Math.floor(cust.perMonthEmi / 2));
+    }
+    setRemarks("");
+    setDate(getTodayYmd());
+    setDiscount("");
+    setCollector(me?.name || team[0]?.name || "Rishi Rathod");
+    setCustomCollectorName("");
+    setMethod("Cash");
+  }, [isOpen, prefill]);
+
+  // Re-fill the amount only when the operator picks a different customer —
+  // not when a sync hands back a fresh copy of the same one.
+  useEffect(() => {
+    if (!customerId) return;
+    const cust = useStore.getState().customers.find((c) => c.id === customerId);
+    if (cust) {
+      setAmount(cust.perMonthEmi.toString());
+      if (method === "Cash & Bank") {
         setCashAmount(Math.floor(cust.perMonthEmi / 2));
         setBankAmount(cust.perMonthEmi - Math.floor(cust.perMonthEmi / 2));
       }
-      setRemarks("");
-      setDate(getTodayYmd());
-      setDiscount("");
-      setCollector(currentUser?.name || staff[0]?.name || "Rishi Rathod");
-      setCustomCollectorName("");
-      setMethod("Cash");
     }
-  }, [open, prefill, customers, currentUser, staff]);
-
-  useEffect(() => {
-    if (customer) {
-      setAmount(customer.perMonthEmi.toString());
-      if (method === "Cash & Bank") {
-        setCashAmount(Math.floor(customer.perMonthEmi / 2));
-        setBankAmount(customer.perMonthEmi - Math.floor(customer.perMonthEmi / 2));
-      }
-    }
-  }, [customerId, customer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId]);
 
   const handleAmountChange = (valStr: string) => {
     setAmount(valStr);
@@ -635,7 +647,7 @@ function CollectDialog() {
         <DialogFooter>
           <GhostBtn onClick={close}>Cancel</GhostBtn>
           <PrimaryBtn
-            disabled={!customerId || !amount || !date || (collector === "Other (Manual Entry)" && !customCollectorName.trim())}
+            disabled={!customerId || !(Number(amount) > 0) || !date || (collector === "Other (Manual Entry)" && !customCollectorName.trim())}
             onClick={() => {
               const activeCollector = collector === "Other (Manual Entry)" ? customCollectorName.trim() : collector;
               const finalRemarks = method === "Cash & Bank"
@@ -670,8 +682,10 @@ function ExpenseDialog() {
   const [date, setDate] = useState(getTodayYmd());
   const [method, setMethod] = useState<string>("Cash");
 
-  const totalIncome = expenses.filter((e) => e.type === "Income").reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  const totalExpense = expenses.filter((e) => e.type !== "Income").reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  // Amounts are stored as "₹1,234" strings; Number() on those is NaN, which
+  // made this balance always ₹0 and the "negative balance" warning permanent.
+  const totalIncome = expenses.filter((e) => e.type === "Income").reduce((sum, e) => sum + parseAmount(e.amount), 0);
+  const totalExpense = expenses.filter((e) => e.type !== "Income").reduce((sum, e) => sum + parseAmount(e.amount), 0);
   const netBalance = totalIncome - totalExpense;
 
   const EXPENSE_CATEGORIES = ["Office Expense", "Ashish Expense", "Salary", "Travel", "Utilities", "Maintenance", "Marketing", "Other Expense"];
@@ -963,7 +977,10 @@ function WithdrawProfitDialog() {
   const totalInterestIncome = payments
     .filter((p) => p.status === "Success")
     .reduce((sum, p) => sum + (custInterestMap.get(p.customerId) || 0), 0);
-  const totalExpenses = expenses.reduce((s, e) => s + (typeof e.amount === "number" ? e.amount : Number(String(e.amount).replace(/[^\d.]/g, "")) || 0), 0);
+  // Same rule as the P&L page: "Income"-type entries are not costs.
+  const totalExpenses = expenses
+    .filter((e) => e.type !== "Income")
+    .reduce((s, e) => s + parseAmount(e.amount), 0);
   const netProfit = (totalFileCharge + totalInterestIncome) - totalExpenses;
 
   const totalWithdrawn = profitTransactions.filter((t) => t.type === "Withdrawal").reduce((s, t) => s + t.amount, 0);

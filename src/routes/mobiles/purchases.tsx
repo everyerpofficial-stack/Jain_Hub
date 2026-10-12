@@ -74,15 +74,17 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
     }
   }, [quickCategory]);
 
-  // Adjust cost when selected product changes
+  // Adjust cost when selected product changes — and only then. Depending on
+  // `products` too meant every background sync / inventory recompute reset
+  // the unit cost the user had typed for this invoice line.
   useEffect(() => {
     if (!productId) {
       setCost("");
     } else {
-      const p = products.find((prod) => prod.id === productId);
-      if (p) setCost(p.purchasePrice.toString());
+      const p = useMobileStore.getState().products.find((prod) => prod.id === productId);
+      if (p) setCost(String(p.purchasePrice ?? ""));
     }
-  }, [productId, products]);
+  }, [productId]);
 
   const handleAddItem = () => {
     const p = products.find((prod) => prod.id === productId);

@@ -230,6 +230,7 @@ const deletedIdsRegistry = new Set<string>();
 export function markIdDeleted(sheet: string, id: string) {
   if (sheet && id) {
     deletedIdsRegistry.add(`${sheet}::${id}`);
+    localCreationTimes.delete(`${sheet}::${id}`);
   }
 }
 
@@ -237,13 +238,46 @@ export function isIdDeleted(sheet: string, id: string): boolean {
   return deletedIdsRegistry.has(`${sheet}::${id}`);
 }
 
+/**
+ * Track IDs created or modified locally on THIS device.
+ * A locally created record should NEVER be deleted by the poller just because
+ * the remote sheet hasn't reflected it yet or previously had that ID.
+ */
+const localCreationTimes = new Map<string, number>();
+
+export function markLocallyCreated(sheet: string, id: string): void {
+  if (sheet && id) {
+    const key = `${sheet}::${id}`;
+    localCreationTimes.set(key, Date.now());
+    deletedIdsRegistry.delete(key);
+    clearSeenId(sheet, id);
+  }
+}
+
+export function isLocallyRecent(sheet: string, id: string, maxAgeMs = 180_000): boolean {
+  if (!sheet || !id) return false;
+  const t = localCreationTimes.get(`${sheet}::${id}`);
+  return t !== undefined && Date.now() - t < maxAgeMs;
+}
+
+export function clearSeenId(sheet: string, id: string): void {
+  const all = loadSeen();
+  const set = all.get(sheet);
+  if (set && set.has(id)) {
+    set.delete(id);
+    persistSeen();
+  }
+}
+
 /** Clear all tracked seen IDs, deleted IDs, and in-flight/settled states (used when clearing database). */
 export function clearSyncState(): void {
   seenCache = new Map();
   deletedIdsRegistry.clear();
+  localCreationTimes.clear();
   inFlight.clear();
   settledAt.clear();
   safeLocalStorage.removeItem(SEEN_IDS_KEY);
 }
+
 
 

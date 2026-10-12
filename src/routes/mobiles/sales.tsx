@@ -98,17 +98,20 @@ function SalesPage() {
     endDate,
   } = useDateFilter();
 
-  // Auto price fetch from catalog when a product is explicitly selected
+  // Auto price fetch from catalog when a product is explicitly selected.
+  // Keyed on productId only: `products` is rebuilt by every inventory
+  // recompute and every background sync, and re-running on that overwrote the
+  // price the cashier had typed — the bill then went out at catalogue price.
   useEffect(() => {
     if (!productId) {
       setManualPrice("");
     } else {
-      const p = products.find((prod) => prod?.id === productId);
+      const p = useMobileStore.getState().products.find((prod) => prod?.id === productId);
       if (p) {
         setManualPrice((p.sellingPrice || p.purchasePrice).toString());
       }
     }
-  }, [productId, products]);
+  }, [productId]);
 
   const selectedProduct = products.find((p) => p?.id === productId);
 
@@ -155,6 +158,11 @@ function SalesPage() {
 
   const periodSalesTotal = filteredSales.reduce((sum, s) => sum + (Number(s?.totalAmount) || 0), 0);
   const periodSalesCount = filteredSales.length;
+  const periodDueTotal = filteredSales.reduce((sum, s) => sum + (Number(s?.dueAmount) || 0), 0);
+  const periodPaidTotal = filteredSales.reduce(
+    (sum, s) => sum + (s?.paymentStatus === "Full Paid" ? Number(s?.totalAmount) || 0 : Number(s?.amountPaid) || 0),
+    0
+  );
 
   const handlePrint = (sale: MobileSale) => {
     if (!sale) return;
@@ -687,6 +695,21 @@ function SalesPage() {
                 <td colspan="4" class="total-row-label">TOTAL</td>
                 <td class="total-amount-box">₹${(Number(sale?.totalAmount) || 0).toLocaleString("en-IN")}</td>
               </tr>
+              ${Number(sale?.dueAmount) > 0 ? `
+              <tr>
+                <td colspan="4" class="total-row-label" style="color: #16a34a; font-size: 12px; border-top: 1px dashed #cbd5e1;">AMOUNT PAID</td>
+                <td style="text-align: right; padding: 6px 14px; font-weight: 700; color: #16a34a; border-top: 1px dashed #cbd5e1; font-size: 13px;">₹${(Number(sale?.amountPaid) || 0).toLocaleString("en-IN")}</td>
+              </tr>
+              <tr>
+                <td colspan="4" class="total-row-label" style="color: #dc2626; font-size: 12px; background: #fef2f2;">BALANCE DUE ${sale?.dueDate ? `(Due by ${escapeHtml(sale.dueDate)})` : ""}</td>
+                <td style="text-align: right; padding: 8px 14px; font-weight: 800; color: #dc2626; background: #fef2f2; font-size: 14px;">₹${(Number(sale?.dueAmount) || 0).toLocaleString("en-IN")}</td>
+              </tr>
+              ` : `
+              <tr>
+                <td colspan="4" class="total-row-label" style="color: #16a34a; font-size: 12px; border-top: 1px dashed #cbd5e1;">STATUS</td>
+                <td style="text-align: right; padding: 6px 14px; font-weight: 700; color: #16a34a; border-top: 1px dashed #cbd5e1; font-size: 12px;">FULL PAID</td>
+              </tr>
+              `}
             </tbody>
           </table>
 
@@ -905,9 +928,10 @@ function SalesPage() {
           />
 
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             <StatCard label="Period Revenue" value={formatInr(periodSalesTotal)} sub="Total sales value" icon={<Receipt className="size-4" />} trend="up" />
             <StatCard label="Invoices Billed" value={periodSalesCount.toString()} sub="Billed invoices" icon={<Smartphone className="size-4" />} />
+            <StatCard label="Customer Due" value={formatInr(periodDueTotal)} sub="Uncollected balance" icon={<Clock className="size-4" />} trend={periodDueTotal > 0 ? "warn" : "up"} />
             <StatCard label="Avg Bill Value" value={formatInr(periodSalesCount ? periodSalesTotal / periodSalesCount : 0)} sub="Per transaction" />
             <StatCard label="UPI & Split Sales Share" value={`${periodSalesTotal > 0 ? Math.round((filteredSales.filter(s => s?.paymentMethod === "UPI" || s?.paymentMethod === "Cash & UPI").reduce((sum, s) => sum + (Number(s?.totalAmount) || 0), 0) / periodSalesTotal) * 100) : 0}%`} sub="Of total turnover" icon={<CreditCard className="size-4" />} />
           </div>
@@ -940,8 +964,8 @@ function SalesPage() {
                 <th className="py-2.5 px-3 font-semibold">Customer Details</th>
                 <th className="py-2.5 px-3 font-semibold">Billed Goods</th>
                 <th className="py-2.5 px-3 font-semibold text-center">Qty</th>
-                <th className="py-2.5 px-3 font-semibold">Payment Mode</th>
-                <th className="py-2.5 px-3 text-right font-semibold">Grand Total</th>
+                <th className="py-2.5 px-3 font-semibold">Payment Status</th>
+                <th className="py-2.5 px-3 text-right font-semibold">Grand Total / Due</th>
                 <th className="py-2.5 px-3 text-right font-semibold">Actions</th>
               </tr>
             </thead>
@@ -960,15 +984,23 @@ function SalesPage() {
                           <div className="font-medium text-foreground/80 flex items-center gap-1">
                             <Calendar className="size-3 text-muted-foreground" /> {sale.date}
                           </div>
-                          {sale.dueDate && (
-                            <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded w-fit">
+                          {Number(sale.dueAmount) > 0 && sale.dueDate ? (
+                            <div className="text-[10px] font-bold text-red-600 dark:text-red-400 mt-1 flex items-center gap-1 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded w-fit">
                               <Clock className="size-3" /> Due: {sale.dueDate}
                             </div>
-                          )}
+                          ) : Number(sale.dueAmount) > 0 ? (
+                            <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded w-fit">
+                              <AlertCircle className="size-3" /> Due Pending
+                            </div>
+                          ) : sale.dueDate ? (
+                            <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded w-fit">
+                              ✓ Cleared
+                            </div>
+                          ) : null}
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-semibold text-foreground">{sale.customerName}</div>
-                          <div className="text-[10px] text-muted-foreground">{sale.customerMobile}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono">{sale.customerMobile}</div>
                           {(sale.fatherName || sale.village) && (
                             <div className="text-[9px] text-muted-foreground/80 italic mt-0.5">
                               Father: {sale.fatherName || "—"} | Village: {sale.village || "—"}
@@ -988,22 +1020,38 @@ function SalesPage() {
                             <Badge tone={sale.paymentMethod === "Cash" ? "neutral" : sale.paymentMethod === "UPI" ? "success" : "info"}>
                               {sale.paymentMethod}
                             </Badge>
-                            <Badge tone={sale.paymentStatus === "Full Paid" ? "success" : sale.paymentStatus === "Partial Paid" ? "warning" : "danger"}>
-                              {sale.paymentStatus} {Number(sale.dueAmount) > 0 && `(Due: ₹${Number(sale.dueAmount).toLocaleString("en-IN")})`}
+                            <Badge tone={Number(sale.dueAmount) <= 0 ? "success" : sale.paymentStatus === "Not Paid" ? "danger" : "warning"}>
+                              {Number(sale.dueAmount) <= 0 ? "Full Paid" : `${sale.paymentStatus}`}
                             </Badge>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-right font-bold text-success text-sm">{formatInr(sale.totalAmount)}</td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="font-extrabold text-foreground text-sm">{formatInr(sale.totalAmount)}</div>
+                          {Number(sale.dueAmount) > 0 ? (
+                            <div className="flex flex-col items-end gap-0.5 mt-1">
+                              <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                Paid: {formatInr(sale.amountPaid)}
+                              </div>
+                              <div className="text-[11px] font-extrabold text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/25 px-1.5 py-0.5 rounded flex items-center gap-1 shadow-xs">
+                                <span>Due: {formatInr(sale.dueAmount)}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center justify-end gap-0.5">
+                              ✓ Fully Paid
+                            </div>
+                          )}
+                        </td>
                         <td className="py-3 px-5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            {sale.paymentStatus !== "Full Paid" && sale.dueAmount > 0 && (
+                            {sale.paymentStatus !== "Full Paid" && Number(sale.dueAmount) > 0 && (
                               <button
                                 title="Receive Payment"
                                 onClick={() => setCollectingSale(sale)}
-                                className="h-7 px-2 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 text-[11px] font-bold flex items-center gap-1 transition-colors shadow-sm cursor-pointer"
+                                className="h-7 px-2.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 text-[11px] font-bold flex items-center gap-1 transition-colors shadow-sm cursor-pointer"
                               >
                                 <HandCoins className="size-3.5" />
-                                <span>Pay</span>
+                                <span>Pay Due</span>
                               </button>
                             )}
                             <button
@@ -1341,7 +1389,7 @@ function SalesPage() {
   );
 }
 
-function CollectSalePaymentDialog({ sale, onClose }: { sale: MobileSale; onClose: () => void }) {
+export function CollectSalePaymentDialog({ sale, onClose }: { sale: MobileSale; onClose: () => void }) {
   const collectSalePayment = useMobileStore((s) => s.collectSalePayment);
   const dueAmt = Number(sale?.dueAmount) || 0;
   const totalAmt = Number(sale?.totalAmount) || 0;

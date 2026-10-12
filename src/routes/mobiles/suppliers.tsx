@@ -350,6 +350,19 @@ function SupplierPayBalanceDialog({
   onClose: () => void;
 }) {
   const paySupplier = useMobileStore((s) => s.paySupplier);
+  const purchases = useMobileStore((s) => s.purchases) || [];
+  const supplierPayments = useMobileStore((s) => s.supplierPayments) || [];
+
+  const sPurchases = purchases.filter(
+    (p) => p.supplierId === supplier.id || (!!p.supplierName && norm(p.supplierName) === norm(supplier.name))
+  );
+  const sPayments = supplierPayments.filter(
+    (pay) => pay.supplierId === supplier.id || (!!pay.supplierName && norm(pay.supplierName) === norm(supplier.name))
+  );
+  const paymentTotal = sPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
+  const settled = settleSupplier(sPurchases, paymentTotal);
+  const actualOutstanding = sPurchases.length > 0 ? settled.outstanding : (Number(supplier.outstanding) || 0);
+
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Cash & UPI">("Cash");
@@ -383,7 +396,7 @@ function SupplierPayBalanceDialog({
       toast.error("Please enter a valid payment amount");
       return;
     }
-    if (amt > supplier.outstanding) {
+    if (amt > actualOutstanding) {
       toast.error("Cannot record payment larger than total outstanding balance");
       return;
     }
@@ -430,7 +443,7 @@ function SupplierPayBalanceDialog({
         <div className="py-4 space-y-3.5 text-sm">
           <div className="flex justify-between items-center bg-muted/30 p-2.5 rounded border border-border/60 text-xs">
             <span className="text-muted-foreground font-medium">Outstanding Debt Balance:</span>
-            <span className="font-bold text-danger text-sm">₹{supplier.outstanding.toLocaleString("en-IN")}</span>
+            <span className="font-bold text-danger text-sm">₹{actualOutstanding.toLocaleString("en-IN")}</span>
           </div>
 
           <label className="block">
@@ -447,7 +460,7 @@ function SupplierPayBalanceDialog({
             <span className="text-xs font-semibold text-muted-foreground">Payment Amount Paid (₹)</span>
             <input
               type="number"
-              max={supplier.outstanding}
+              max={actualOutstanding}
               value={amount}
               onChange={(e) => handleAmountChange(e.target.value)}
               placeholder="e.g. 20000"

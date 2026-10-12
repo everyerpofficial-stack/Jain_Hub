@@ -26,7 +26,6 @@ export const Route = createFileRoute("/mobiles/accessories")({
 function useStoreBalance() {
   const sales = useMobileStore((s) => s.sales);
   const expenses = useMobileStore((s) => s.expenses);
-  const purchases = useMobileStore((s) => s.purchases);
   const supplierPayments = useMobileStore((s) => s.supplierPayments);
 
   return useMemo(() => {
@@ -53,7 +52,7 @@ function useStoreBalance() {
       const amt = parseAmount(e.amount);
       if (amt > 0) {
         const isInflow = e.type === "Income";
-        const { cash, bank } = splitByMethod(e.paymentMode, amt, e.cashAmount, e.bankAmount);
+        const { cash, bank } = splitByMethod(e.paymentMode, amt, toOptionalNumber(e.cashAmount), toOptionalNumber(e.bankAmount));
         if (isInflow) {
           cashIn += cash;
           bankIn += bank;
@@ -64,17 +63,10 @@ function useStoreBalance() {
       }
     });
 
-    // 3. Outflows from Paid Purchases
-    purchases.forEach((p) => {
-      if (p.status === "Paid") {
-        const { cash, bank } = splitByMethod(p.paymentMode, p.amount, p.cashAmount, p.bankAmount);
-        cashIn -= cash;
-        bankIn -= bank;
-      }
-    });
-
-    // 4. Outflows from Supplier Debt Payments
-    supplierPayments.forEach((sp) => {
+    // 3. Outflows to suppliers. Every payment on a purchase is recorded as a
+    // SupplierPayment, so counting "Paid" purchases as well deducted each
+    // pay-now bill twice (see the matching note in CashFlowDashboard).
+    (supplierPayments || []).forEach((sp) => {
       const { cash, bank } = splitByMethod(sp.paymentMode, sp.amount, sp.cashAmount, sp.bankAmount);
       cashIn -= cash;
       bankIn -= bank;
@@ -88,7 +80,7 @@ function useStoreBalance() {
       upiBalance,
       totalBalance: cashBalance + upiBalance,
     };
-  }, [sales, expenses, purchases, supplierPayments]);
+  }, [sales, expenses, supplierPayments]);
 }
 
 function AccessoryFormDialog({

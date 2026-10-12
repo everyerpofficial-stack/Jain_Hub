@@ -18,13 +18,13 @@ import {
 import {
   useMobileStore,
   saleRow, purchaseRow, productRow, supplierRow, mobileCustomerRow,
-  mobileExpenseRow, accessoryRow, supplierPaymentRow, warrantyRow,
+  mobileExpenseRow, accessoryRow, supplierPaymentRow, warrantyRow, warrantyFromRow,
   auditRow as mobileAuditRow, auditFromRow as mobileAuditFromRow,
   itemsFromSheet, safeItems,
   mobileSettingsRow, MOBILE_SETTINGS_ROW_ID,
 } from "./mobileStore";
 import { digestSheets, readSheet, upsertRow, type SheetName, type SheetRow } from "./googleSheets";
-import { isSheetBusy, isIdDeleted, isSheetUnavailable, recordSheetIds, wasSeenOnSheet } from "./syncQueue";
+import { isSheetBusy, isIdDeleted, isSheetUnavailable, recordSheetIds, wasSeenOnSheet, isLocallyRecent } from "./syncQueue";
 import { toOptionalNumber } from "./ledger";
 import { toast } from "sonner";
 
@@ -107,10 +107,9 @@ function safeReconcile<T extends { id?: string }>(
 
   // 1. If sheet returns 0 rows:
   if (rows.length === 0 && localList.length > 0) {
-    // Only re-upload items that have NEVER been seen on the sheet before (genuinely unsynced local drafts).
-    // If an item WAS seen on the sheet before and now the sheet has 0 rows, it means the sheet/database was cleared.
+    // Only re-upload items that have NEVER been seen on the sheet before or were recently created locally.
     const genuinelyUnsynced = localList.filter(
-      (item) => item && item.id && !isIdDeleted(sheet, String(item.id)) && !wasSeenOnSheet(sheet, String(item.id))
+      (item) => item && item.id && !isIdDeleted(sheet, String(item.id)) && (!wasSeenOnSheet(sheet, String(item.id)) || isLocallyRecent(sheet, String(item.id)))
     );
 
     if (genuinelyUnsynced.length > 0) {
@@ -118,9 +117,6 @@ function safeReconcile<T extends { id?: string }>(
         push(item);
       }
       setter(() => ({ [key]: genuinelyUnsynced }));
-    } else {
-      // All local items were previously seen on sheet and now sheet has 0 rows -> clear local list too!
-      setter(() => ({ [key]: [] }));
     }
     return;
   }
@@ -128,9 +124,7 @@ function safeReconcile<T extends { id?: string }>(
   // 2. Map of sheet items by ID
   const sheetMap = new Map<string, T>(rows.map((r) => [String(r.id), r]));
 
-  // Remember what the sheet holds right now. This is what lets step 3 tell a
-  // record deleted by another device apart from a record that has never
-  // reached the sheet — see the note on recordSheetIds in syncQueue.ts.
+  // Remember what the sheet holds right now.
   recordSheetIds(
     sheet,
     rows.map((r) => String(r.id ?? "")).filter(Boolean)
@@ -148,6 +142,13 @@ function safeReconcile<T extends { id?: string }>(
 
     // Deleted on this device; the delete may still be in flight.
     if (isIdDeleted(sheet, idStr)) continue;
+
+    // Locally created or edited recently: keep it and ensure it gets pushed
+    if (isLocallyRecent(sheet, idStr)) {
+      merged.push(loc);
+      push(loc);
+      continue;
+    }
 
     // This device has seen the row on the sheet before and it is gone now, so
     // somebody deleted it. Dropping it locally is the point: re-uploading it
@@ -568,6 +569,9 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
             cashAmount: toOptionalNumber(r.cashAmount),
             bankAmount: toOptionalNumber(r.bankAmount),
           };
+        }
+        if (sheet === "Mobiles_WarrantyClaims") {
+          return warrantyFromRow(r);
         }
         return r;
       });

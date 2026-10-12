@@ -54,6 +54,8 @@ function BlacklistCustomerDialog({
   const [reason, setReason] = useState("Mobile collected from customer due to unpaid EMIs");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Keyed on the id: the parent passes a live copy that is replaced on every
+  // status recheck and background sync, which wiped the reason being typed.
   useEffect(() => {
     if (customer) {
       setDate(
@@ -65,7 +67,8 @@ function BlacklistCustomerDialog({
           "Mobile collected from customer due to unpaid EMIs"
       );
     }
-  }, [customer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.id]);
 
   if (!customer) return null;
 

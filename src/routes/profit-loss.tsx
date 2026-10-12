@@ -68,7 +68,11 @@ function ProfitLossPage() {
     return isDateInRange(cDate, startDate, endDate);
   });
 
+  // The Income / Expense register holds both kinds of entry. Only the
+  // "Expense" ones are costs — summing all of them subtracted owner capital,
+  // opening cash and other income from profit as if they had been spent.
   const filteredExpenses = expenses.filter((e) => {
+    if (e.type === "Income") return false;
     const eDate = parseAppDate(e.date);
     return isDateInRange(eDate, startDate, endDate);
   });
@@ -127,22 +131,24 @@ function ProfitLossPage() {
 
     for (let i = 0; i < 12; i++) {
       const monthLabel = months[i];
+      // Match on the parsed date, not the date text: rows that came back from
+      // Google Sheets read as YYYY-MM-DD and never contained "jan", "feb"…, so
+      // every synced record was missing from the monthly figures.
+      const inMonth = (d: Date | null) => !!d && d.getFullYear() === referenceYear && d.getMonth() === i;
 
       // 1. File charges of customers registered in this month
       const fileCharges = customers
         .filter((c) => {
-          const dateLower = String(c.billDate ?? "").toLowerCase();
           const pDate = parseAppDate(c.billDate);
-          return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
+          return inMonth(pDate) && isDateInRange(pDate, startDate, endDate);
         })
         .reduce((sum, c) => sum + (c.fileCharge || 0), 0);
 
       // 2. Realised interest from successful payments in this month
       const interestRealised = payments
         .filter((p) => {
-          const dateLower = String(p.date ?? "").toLowerCase();
           const pDate = parseAppDate(p.date);
-          return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && p.status === "Success" && isDateInRange(pDate, startDate, endDate);
+          return inMonth(pDate) && p.status === "Success" && isDateInRange(pDate, startDate, endDate);
         })
         .reduce((sum, p) => {
           const interestVal = custInterestMap.get(p.customerId) || 0;
@@ -154,9 +160,8 @@ function ProfitLossPage() {
       // 3. Expenses recorded in this month
       const expense = expenses
         .filter((e) => {
-          const dateLower = String(e.date ?? "").toLowerCase();
           const pDate = parseAppDate(e.date);
-          return dateLower.includes(monthLabel.toLowerCase()) && dateLower.includes(yearStr) && isDateInRange(pDate, startDate, endDate);
+          return e.type !== "Income" && inMonth(pDate) && isDateInRange(pDate, startDate, endDate);
         })
         .reduce((sum, e) => sum + parseAmount(e.amount), 0);
 

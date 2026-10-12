@@ -33,100 +33,137 @@ export const MOBILE_BRANDS: Record<string, string[]> = {
 export const RAM_ROM_OPTIONS = ["4GB/64GB", "4GB/128GB", "6GB/128GB", "6GB/256GB", "8GB/128GB", "8GB/256GB"];
 export const INTEREST_OPTIONS = ["1", "2", "3", "4", "5"];
 export const EMI_COUNT_OPTIONS = Array.from({ length: 24 }, (_, i) => String(i + 1));
-export const REGIONS = ["Baserkund", "Saikheda", "Rasva", "Tamrani", "Bamonali", "Balakwada", "Jaipur"];
+export const REGIONS = [
+  "Bhopalpura",
+  "Rampura",
+  "Katriya",
+  "Kusumpura",
+  "Besarkund",
+  "Balakwada",
+];
 
 export const VILLAGES_BY_REGION: Record<string, string[]> = {
-  Baserkund: [
-    "Bajirpura",
-    "Andhavan",
-    "Pokhar",
-    "Sailani",
-    "Chandanpuri",
-    "Umariya",
-    "Utavat",
-    "Sangvi",
-    "Javada",
-    "Naraypura",
-    "Aujari",
-    "Bider",
-    "Khushwad",
-    "Makandkheda",
-    "Mandeleswar",
-    "Kalbujarg",
-    "Dharmpuri",
+  Bhopalpura: [
+    "Bhopalpura",
+    "Patyapura",
+    "Bardewla",
+    "Bamanda",
+    "Bamandi",
+    "Reghwa",
+    "Rupkheda",
+    "Khadakwani",
+    "Pipaljhopa",
+    "Magarkhedi",
+    "Nimrani",
+    "Pathora",
+    "Balsamad",
+    "Balgaon",
+    "Salimpura",
+    "Kachhipura",
+    "Balkhad",
+    "Satkur",
+    "Maharajkhedi",
   ],
-  Saikheda: [
+  Rampura: [
     "Rampura",
-    "Tirnga",
-    "Dakhopur",
-    "Naydad",
-    "Besavad",
-    "Hirapura",
-  ],
-  Rasva: [
-    "Katrya",
-    "Vandiya",
-    "Singun",
-    "Abari",
-    "Maltar",
-    "Vagadi",
-    "Jodhpura",
-    "Nandla",
+    "Randhapura",
+    "Saikheda",
+    "Titranya",
+    "Jalkha",
     "Dolani",
-    "Hatola",
-    "Motapura",
-    "Mirzapura",
+    "Mahitpura",
+    "Naydad",
+    "Bhesawad",
+    "Jahangirpura",
+    "Bilidad",
+    "Ragodad",
+    "Hirapur",
     "Ambapura",
-    "Dangadkheda",
-    "Jahagirpura",
-    "Khurumpura",
   ],
-  Tamrani: [
-    "Mapalpua",
-    "Gopalpura",
-    "Navalpura",
-    "Bardevla",
-    "Regva",
-    "Khachipura",
-    "Rupakheda",
-    "Balsamand",
-    "Maingaon",
-    "Aasgaon",
-    "Kundhadiya",
+  Katriya: [
+    "Katriya",
+    "Badiya",
+    "Raswa",
+    "Daggadkhedi",
+    "Mirjapur",
+    "Beganda",
+    "Begandi",
+    "Nandla",
+    "Ashwariya",
+    "Singun",
+    "Likhhi",
+    "Rampura",
+    "Rajur",
+    "Sangvi",
+    "Kolambiya",
+    "Akawliya",
+    "Hatola",
+    "Dewla",
+    "Dalka",
   ],
-  Bamonali: [
-    "Mokriya",
-    "Surva",
+  Kusumpura: [
+    "Surwa",
+    "Devjhiri",
+    "Bhokriya",
     "Kusumpura",
-    "Tamrani",
-    "Jaljyote",
+    "Temarani",
+    "Jaljyoti",
     "Khedi",
-    "Chapla",
+    "Chhoti Chhalpa",
+    "Chhalpa",
     "Pandhaniya",
-    "Andvad",
-    "Jayli",
-    "Chokhti",
-    "Coloumbiya",
-    "Aswariya",
-    "Damanchima",
-    "Sangwal",
+    "Pokhar",
+    "Aasangaon",
+    "Mengaon",
+    "Piprata",
+    "Bhadli",
+    "Khargaon",
+  ],
+  Besarkund: [
+    "Besarkund",
+    "Dharampuri",
+    "Pokhar",
+    "Aghawan",
+    "Narayanpura",
+    "Bajitpura",
+    "Khedi",
+    "Selani",
+    "Bither",
+    "Sawda",
+    "Jawda",
+    "Balyapura",
+    "Chandanpuri",
+    "Umriya",
+    "Utawad",
+    "Sangwi",
+    "Raypura",
+    "Kalikarai",
+    "Borawa",
+    "Mogawa",
+    "Lohari",
+    "Kondapura",
+    "Braslay",
+    "Bamkhal",
+    "Ahilyapura",
+    "Kasrawad",
+    "Ojhara",
+    "Gopalpura",
+    "Chhoti Kasrawad",
+    "Pipalgaon",
   ],
   Balakwada: [
-    "Bhopalpura",
-    "Silohiy",
-    "Jhagdi",
-    "Dasnaval",
-    "Pipalvadi",
-    "Kalikaray",
-    "Damkheda",
-    "Sauli",
-  ],
-  Jaipur: [
-    "Jaipur",
+    "Balakwada",
   ],
 };
 
-export const VILLAGES = Object.values(VILLAGES_BY_REGION).flat();
+// Aliases for backwards compatibility with historical sheet records
+VILLAGES_BY_REGION["Baserkund"] = VILLAGES_BY_REGION["Besarkund"];
+VILLAGES_BY_REGION["Saikheda"] = VILLAGES_BY_REGION["Rampura"];
+VILLAGES_BY_REGION["Rasva"] = VILLAGES_BY_REGION["Katriya"];
+VILLAGES_BY_REGION["Tamrani"] = VILLAGES_BY_REGION["Kusumpura"];
+VILLAGES_BY_REGION["Bamonali"] = VILLAGES_BY_REGION["Kusumpura"];
+
+export const VILLAGES = Array.from(new Set(Object.values(VILLAGES_BY_REGION).flat()));
 
 // ---- Customer (Mobile Finance) ----
 export type Customer = {
@@ -181,6 +218,8 @@ export type Payment = {
   id: string;
   customer: string;
   customerId: string;
+  /** Set on standalone-loan collections, so deleting the payment can reverse the loan. */
+  loanId?: string;
   date: string;
   amount: string;
   discount?: string;
@@ -465,6 +504,10 @@ export function parseAppDate(dateStr: string | null | undefined): Date | null {
 }
 
 export function isDateInRange(date: Date | null, start: Date | null, end: Date | null): boolean {
+  // No bounds means "All Time": every record belongs, including one whose date
+  // is blank or in a format parseAppDate can't read. Returning false here made
+  // such records silently vanish from every list and total on the default view.
+  if (!start && !end) return true;
   if (!date) return false;
   const dTime = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   
@@ -482,6 +525,16 @@ export function isDateInRange(date: Date | null, start: Date | null, end: Date |
 }
 
 // ---- EMI Date Advancement & Retreat Helpers ----
+/**
+ * Same day-of-month, `delta` months away, clamped to that month's last day.
+ * `new Date(y, m + 1, 31)` overflows instead: 31 Jan became 3 Mar, so a
+ * customer whose EMI falls on the 29th–31st skipped February's due date.
+ */
+function shiftMonthsClamped(d: Date, delta: number): Date {
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + delta + 1, 0).getDate();
+  return new Date(d.getFullYear(), d.getMonth() + delta, Math.min(d.getDate(), lastDay));
+}
+
 export function advanceEmiDate(input: string): string {
   const dateStr = typeof input === "string" ? input.trim() : String(input ?? "").trim();
   if (!dateStr) return "";
@@ -489,8 +542,7 @@ export function advanceEmiDate(input: string): string {
   const parsed = parseAppDate(dateStr);
   if (!parsed) return dateStr;
 
-  const targetDay = parsed.getDate();
-  const nextDate = new Date(parsed.getFullYear(), parsed.getMonth() + 1, targetDay);
+  const nextDate = shiftMonthsClamped(parsed, 1);
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     const year = nextDate.getFullYear();
@@ -513,8 +565,7 @@ export function retreatEmiDate(input: string): string {
   const parsed = parseAppDate(dateStr);
   if (!parsed) return dateStr;
 
-  const targetDay = parsed.getDate();
-  const prevDate = new Date(parsed.getFullYear(), parsed.getMonth() - 1, targetDay);
+  const prevDate = shiftMonthsClamped(parsed, -1);
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     const year = prevDate.getFullYear();
@@ -899,6 +950,7 @@ export function auditFromRow(r: SheetRow): AuditEntry {
 export function paymentRow(p: Payment): SheetRow {
   return {
     id: p.id, customer: p.customer, customerId: p.customerId || "",
+    loanId: p.loanId || "",
     amount: p.amount, discount: p.discount || "", method: p.method,
     cashAmount: p.cashAmount ?? "", bankAmount: p.bankAmount ?? "",
     date: p.date, collector: p.collector, remarks: p.remarks || "",
@@ -1266,26 +1318,12 @@ export const useStore = create<State>()(
             const newPaid = Math.max(0, cust.paidEmis - 1);
             const newPending = cust.noOfEmi - newPaid;
             const newPendingAmt = newPending * cust.perMonthEmi;
-            
-            const revertEmiDate = (dStr: string): string => {
-              const match = dStr.match(/^(\d{2})\s+([a-zA-Z]{3})\s+(\d{4})$/);
-              if (match) {
-                const day = parseInt(match[1], 10);
-                const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                const monthIdx = months.indexOf(match[2]);
-                const year = parseInt(match[3], 10);
-                if (monthIdx !== -1) {
-                  const d = new Date(year, monthIdx - 1, day);
-                  const prevDay = String(d.getDate()).padStart(2, '0');
-                  const prevMonth = months[d.getMonth()];
-                  const prevYear = d.getFullYear();
-                  return `${prevDay} ${prevMonth} ${prevYear}`;
-                }
-              }
-              return dStr;
-            };
 
-            const prevEmiDate = revertEmiDate(cust.emiDate);
+            // retreatEmiDate reads every stored format. The inline regex this
+            // replaced only matched "DD Mon YYYY", so for any customer synced
+            // from the sheet (stored as YYYY-MM-DD) or a "Sept" date, deleting a
+            // payment reverted the EMI count but left the due date advanced.
+            const prevEmiDate = retreatEmiDate(cust.emiDate);
             const remainingPayments = get().payments.filter((x) => x.id !== id && x.customerId === p.customerId && x.status === "Success");
             const lastP = remainingPayments[0];
 
@@ -1299,7 +1337,8 @@ export const useStore = create<State>()(
                       pendingAmount: newPendingAmt,
                       lastPaymentDate: lastP ? lastP.date : "—",
                       lastPaymentAmt: lastP ? parseAmount(lastP.amount) : 0,
-                      status: newPending === 0 ? "Closed" : "Active",
+                      // Reversing a payment must not quietly lift a blacklist.
+                      status: c.status === "Blacklisted" ? "Blacklisted" : newPending === 0 ? "Closed" : "Active",
                       emiDate: prevEmiDate,
                       due: prevEmiDate
                     }
@@ -1330,6 +1369,32 @@ export const useStore = create<State>()(
           if (revertedCust) {
             syncUpsert(get, "Finance_Customers", customerRow(revertedCust), "customer sync (from payment delete)");
           }
+        }
+
+        // A standalone-loan collection also bumped the loan's collected total
+        // and EMI count. Without reversing those, deleting a mistaken entry left
+        // the loan over-collected — often "Completed" and dropped from follow-up.
+        // Payments recorded before loanId existed carry the id in the default
+        // remark instead.
+        const loanId = p.loanId || (!p.customerId ? /^Loan Collection for (\S+)$/.exec(p.remarks || "")?.[1] : undefined);
+        if (loanId && get().loans.some((l) => l.id === loanId)) {
+          set((s) => ({
+            loans: recalculateLoanStatuses(
+              s.loans.map((l) =>
+                l.id === loanId
+                  ? {
+                      ...l,
+                      collectedAmount: Math.max(0, (l.collectedAmount || 0) - parseAmount(p.amount)),
+                      paidEmis: Math.max(0, (l.paidEmis || 0) - 1),
+                      // Let recalculateLoanStatuses re-derive it from the reduced total.
+                      status: l.status === "Completed" ? "Active" : l.status,
+                    }
+                  : l
+              )
+            ),
+          }));
+          const revertedLoan = get().loans.find((l) => l.id === loanId);
+          if (revertedLoan) syncUpsert(get, "Finance_Loans", loanRow(revertedLoan), "loan sync (from payment delete)");
         }
       },
 
@@ -1932,6 +1997,7 @@ export const useStore = create<State>()(
           id: txnId,
           customer: loan.customer,
           customerId: "",
+          loanId: loan.id,
           date: paymentDate,
           amount: fmtInr(amount),
           pending: isFullyPaid ? "0" : "—",
@@ -2205,15 +2271,22 @@ export const useStore = create<State>()(
         if (!sheetsConfig.enabled || !sheetsConfig.url) {
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
+        // A table that is empty on THIS device is skipped, not written. writeSheet
+        // with [] clears the shared sheet, so pressing "Sync Now" on a fresh or
+        // not-yet-loaded browser erased the whole shop's records. Deletes are
+        // already pushed row by row; deliberate wipes go through resetSeed.
+        const push = async (sheet: SheetName, rows: SheetRow[]) => {
+          if (rows.length > 0) await writeSheet(sheetsConfig.url, sheet, rows);
+        };
         try {
-          await writeSheet(sheetsConfig.url, "Finance_Customers", customers.map(customerRow));
-          await writeSheet(sheetsConfig.url, "Finance_Payments", payments.map(paymentRow));
-          await writeSheet(sheetsConfig.url, "Finance_Expenses", expenses.map(expenseRow));
-          await writeSheet(sheetsConfig.url, "Finance_Investments", investments.map(investmentRow));
-          await writeSheet(sheetsConfig.url, "Finance_Loans", (loans || []).map(loanRow));
-          await writeSheet(sheetsConfig.url, "Finance_ProfitTransactions", (profitTransactions || []).map(profitTransactionRow));
-          await writeSheet(sheetsConfig.url, "Finance_Documents", (documents || []).map(documentRow));
-          await writeSheet(sheetsConfig.url, "Finance_Staff", staff.map(staffRow));
+          await push("Finance_Customers", customers.map(customerRow));
+          await push("Finance_Payments", payments.map(paymentRow));
+          await push("Finance_Expenses", expenses.map(expenseRow));
+          await push("Finance_Investments", investments.map(investmentRow));
+          await push("Finance_Loans", (loans || []).map(loanRow));
+          await push("Finance_ProfitTransactions", (profitTransactions || []).map(profitTransactionRow));
+          await push("Finance_Documents", (documents || []).map(documentRow));
+          await push("Finance_Staff", staff.map(staffRow));
           const ts = nowTimestamp();
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };

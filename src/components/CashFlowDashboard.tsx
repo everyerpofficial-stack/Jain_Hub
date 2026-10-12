@@ -66,7 +66,6 @@ export function CashFlowDashboard() {
   // Mobiles store
   const mSales = useMobileStore((s) => s.sales);
   const mExpenses = useMobileStore((s) => s.expenses);
-  const mPurchases = useMobileStore((s) => s.purchases);
   const mSupplierPayments = useMobileStore((s) => s.supplierPayments);
 
   // --- 2. Calculate Finance Cash Flow Items ---
@@ -243,9 +242,14 @@ export function CashFlowDashboard() {
         const cat = tx.type === "Withdrawal" ? "Profit Withdrawal" : "Profit Redeposit";
         const desc = tx.type === "Withdrawal" ? `Profit withdrawal (${tx.notes || "Owner Distribution"})` : `Redeposit of taken profit (${tx.notes || "Capital Return"})`;
 
-        if (tx.method === "Cash & Bank") {
-          const cashPart = Math.floor(amt / 2);
-          const bankPart = amt - cashPart;
+        // The Withdraw / Deposit dialogs record "Cash & UPI" with explicit
+        // portions; only "Cash & Bank" was recognised here, so those fell to the
+        // branch below and the whole amount was booked as UPI — the cash that
+        // actually left (or returned to) the drawer never showed up.
+        if (tx.method === "Cash & Bank" || tx.method === "Cash & UPI") {
+          const { cash: cashPart, bank: bankPart } = splitByMethod(
+            tx.method, amt, toOptionalNumber(tx.cashAmount), toOptionalNumber(tx.bankAmount)
+          );
           if (cashPart > 0) {
             items.push({
               id: `F-PTX-${tx.id}-CASH`, date: tx.date, dateObj: dObj, module: "Finance", type,
@@ -344,8 +348,11 @@ export function CashFlowDashboard() {
         const flowType = isInflow ? "Inflow" : "Outflow";
 
         if (e.paymentMode === "Cash & UPI" || e.paymentMode === "Cash & Bank") {
-          const cashPart = e.cashAmount !== undefined ? e.cashAmount : Math.floor(amt / 2);
-          const bankPart = e.bankAmount !== undefined ? e.bankAmount : (amt - cashPart);
+          // toOptionalNumber: a blank split cell from Sheets is "", which used to
+          // count as a stored portion and then drop the entry entirely.
+          const { cash: cashPart, bank: bankPart } = splitByMethod(
+            e.paymentMode, amt, toOptionalNumber(e.cashAmount), toOptionalNumber(e.bankAmount)
+          );
           
           if (cashPart > 0) {
             items.push({
@@ -389,42 +396,16 @@ export function CashFlowDashboard() {
       }
     });
 
-    // Mobile Purchases immediately paid (Outflow)
-    mPurchases.forEach((p) => {
-      if (p.status === "Paid") {
-        const dObj = parseAppDate(p.date);
-        const { cash, bank } = splitByMethod(p.paymentMode, p.amount, p.cashAmount, p.bankAmount);
-        const split = cash > 0 && bank > 0;
-        if (cash > 0) {
-          items.push({
-            id: `M-PUR-${p.id}-CASH`,
-            date: p.date,
-            dateObj: dObj,
-            module: "Mobiles",
-            type: "Outflow",
-            category: "Stock Purchase",
-            description: `Purchase Invoice ${p.invoiceNo} from ${p.supplierName}${split ? " (Cash portion)" : ""}`,
-            amount: cash,
-            method: "Cash",
-          });
-        }
-        if (bank > 0) {
-          items.push({
-            id: `M-PUR-${p.id}-BANK`,
-            date: p.date,
-            dateObj: dObj,
-            module: "Mobiles",
-            type: "Outflow",
-            category: "Stock Purchase",
-            description: `Purchase Invoice ${p.invoiceNo} from ${p.supplierName}${split ? " (UPI/Bank portion)" : ""}`,
-            amount: bank,
-            method: "UPI",
-          });
-        }
-      }
-    });
-
-    // Mobile Supplier payments for outstanding debt (Outflow)
+    // Money paid to suppliers (Outflow).
+    //
+    // Supplier payments are the only source here. Every rupee paid on a
+    // purchase — at the counter (recordPurchase), against one bill
+    // (payPurchaseBalance) or against the account (paySupplier) — is written
+    // as a SupplierPayment with its real date and cash/UPI split. This used to
+    // ALSO book every "Paid" purchase, so a pay-now bill left the drawer twice,
+    // and a credit bill settled later was deducted again on its purchase date.
+    // (ledger.ts records the same double count once fixed in the supplier
+    // profile.)
     mSupplierPayments.forEach((sp) => {
       const dObj = parseAppDate(sp.date);
       const { cash, bank } = splitByMethod(sp.paymentMode, sp.amount, sp.cashAmount, sp.bankAmount);
@@ -437,7 +418,7 @@ export function CashFlowDashboard() {
           module: "Mobiles",
           type: "Outflow",
           category: "Supplier Payment",
-          description: `Paid outstanding balance to vendor: ${sp.supplierName}${split ? " (Cash portion)" : ""}`,
+          description: `Payment to vendor: ${sp.supplierName}${split ? " (Cash portion)" : ""}`,
           amount: cash,
           method: "Cash",
         });
@@ -450,7 +431,7 @@ export function CashFlowDashboard() {
           module: "Mobiles",
           type: "Outflow",
           category: "Supplier Payment",
-          description: `Paid outstanding balance to vendor: ${sp.supplierName}${split ? " (UPI/Bank portion)" : ""}`,
+          description: `Payment to vendor: ${sp.supplierName}${split ? " (UPI/Bank portion)" : ""}`,
           amount: bank,
           method: "UPI",
         });
@@ -458,7 +439,7 @@ export function CashFlowDashboard() {
     });
 
     return items;
-  }, [mSales, mExpenses, mPurchases, mSupplierPayments]);
+  }, [mSales, mExpenses, mSupplierPayments]);
 
   // --- 4. Filtering by Date Range & Tab ---
   const activeRawItems = useMemo(() => {
