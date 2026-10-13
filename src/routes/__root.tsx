@@ -6,6 +6,7 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -62,10 +63,18 @@ export function NotFoundComponent() {
   );
 }
 
-export function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+export function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   const chunkError = isChunkLoadError(error);
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : error && typeof error === "object" && "message" in error
+          ? String((error as { message: unknown }).message)
+          : "";
 
   useEffect(() => {
     // A stale chunk after a redeploy can't be fixed by re-running loaders —
@@ -89,13 +98,13 @@ export function ErrorComponent({ error, reset }: { error: Error; reset: () => vo
         </p>
         {/* Without this the page was a dead end: no way for the shop to say
             what broke, and no way to tell two different faults apart. */}
-        {!chunkError && error?.message && (
+        {!chunkError && errorMessage && (
           <details className="mt-4 text-left">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
               Show error details
             </summary>
             <pre className="mt-2 max-h-48 overflow-auto rounded-md border border-border bg-muted/30 p-3 text-left text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
-              {error.message}
+              {errorMessage}
             </pre>
           </details>
         )}
