@@ -708,120 +708,195 @@ export function CashFlowDashboard() {
         endDate={endDate}
       />
 
-      {/* Overview Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        <Card className="p-4 border-l-4 border-l-success flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Cash Inflow</span>
-            <div className="bg-success/15 p-1 rounded">
-              <TrendingUp className="size-4 text-success" />
+      {/* Overview Stats Grid: 4 Consolidated KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        {/* CARD 1: INFLOW (Total, Cash & Bank) */}
+        <Card className="p-4 border-l-4 border-l-success flex flex-col justify-between bg-gradient-to-br from-success/[0.03] to-transparent shadow-sm">
+          <div>
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-xs font-bold text-success uppercase tracking-wider">Total Inflow</span>
+                <div className="text-xl font-black text-foreground mt-0.5 tracking-tight">{fmt(stats.totalInflow)}</div>
+              </div>
+              <div className="bg-success/15 p-2 rounded-lg text-success">
+                <TrendingUp className="size-4" />
+              </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-lg font-extrabold text-foreground">{fmt(stats.cashIn)}</div>
             {activeTab === "Combined" && (
-              <div className="text-[9px] font-mono text-muted-foreground/80 mt-0.5 truncate" title={`Jain Finance: ${fmt(breakdownStats.Finance.cashIn)} + Jain Mobiles: ${fmt(breakdownStats.Mobiles.cashIn)}`}>
-                {fmt(breakdownStats.Finance.cashIn)} (Fin) + {fmt(breakdownStats.Mobiles.cashIn)} (Mob)
+              <div className="text-[9px] font-mono text-muted-foreground/80 mt-1 truncate" title={`Jain Finance: ${fmt(breakdownStats.Finance.totalInflow)} + Jain Mobiles: ${fmt(breakdownStats.Mobiles.totalInflow)}`}>
+                {fmt(breakdownStats.Finance.totalInflow)} (Fin) + {fmt(breakdownStats.Mobiles.totalInflow)} (Mob)
               </div>
             )}
-            <p className="text-[10px] text-muted-foreground mt-0.5">Total physically received cash</p>
           </div>
-        </Card>
 
-        <Card className="p-4 border-l-4 border-l-info flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Bank Inflow (UPI)</span>
-            <div className="bg-info/15 p-1 rounded">
-              <TrendingUp className="size-4 text-info" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-lg font-extrabold text-foreground">{fmt(stats.bankIn)}</div>
-            {activeTab === "Combined" && (
-              <div className="text-[9px] font-mono text-muted-foreground/80 mt-0.5 truncate" title={`Jain Finance: ${fmt(breakdownStats.Finance.bankIn)} + Jain Mobiles: ${fmt(breakdownStats.Mobiles.bankIn)}`}>
-                {fmt(breakdownStats.Finance.bankIn)} (Fin) + {fmt(breakdownStats.Mobiles.bankIn)} (Mob)
+          <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-2 gap-2">
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/40">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-emerald-500"></span> Inflow (Cash)
               </div>
-            )}
-            <p className="text-[10px] text-muted-foreground mt-0.5">UPI/Bank deposit entries</p>
-          </div>
-        </Card>
+              <div className="text-sm font-extrabold text-foreground mt-0.5">{fmt(stats.cashIn)}</div>
+              {activeTab === "Combined" && (
+                <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5" title={`Fin: ${fmt(breakdownStats.Finance.cashIn)} | Mob: ${fmt(breakdownStats.Mobiles.cashIn)}`}>
+                  {fmt(breakdownStats.Finance.cashIn)} (Fin) + {fmt(breakdownStats.Mobiles.cashIn)} (Mob)
+                </div>
+              )}
+            </div>
 
-        <Card className="p-4 border-l-4 border-l-danger flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Total Outflows</span>
-            <div className="bg-danger/15 p-1 rounded">
-              <TrendingDown className="size-4 text-danger" />
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/40">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-sky-500"></span> Inflow (Bank)
+              </div>
+              <div className="text-sm font-extrabold text-foreground mt-0.5">{fmt(stats.bankIn)}</div>
+              {activeTab === "Combined" && (
+                <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5" title={`Fin: ${fmt(breakdownStats.Finance.bankIn)} | Mob: ${fmt(breakdownStats.Mobiles.bankIn)}`}>
+                  {fmt(breakdownStats.Finance.bankIn)} (Fin) + {fmt(breakdownStats.Mobiles.bankIn)} (Mob)
+                </div>
+              )}
             </div>
           </div>
-          <div className="mt-3">
-            <div className="text-lg font-extrabold text-foreground">{fmt(stats.totalOutflow)}</div>
+          <p className="text-[10px] text-muted-foreground mt-2">Cash drawer & UPI/Bank receipts</p>
+        </Card>
+
+        {/* CARD 2: OUTFLOW (Total, Cash & Bank) */}
+        <Card className="p-4 border-l-4 border-l-danger flex flex-col justify-between bg-gradient-to-br from-danger/[0.03] to-transparent shadow-sm">
+          <div>
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-xs font-bold text-danger uppercase tracking-wider">Total Outflows</span>
+                <div className="text-xl font-black text-foreground mt-0.5 tracking-tight">{fmt(stats.totalOutflow)}</div>
+              </div>
+              <div className="bg-danger/15 p-2 rounded-lg text-danger">
+                <TrendingDown className="size-4" />
+              </div>
+            </div>
             {activeTab === "Combined" && (
-              <div className="text-[9px] font-mono text-muted-foreground/80 mt-0.5 truncate" title={`Jain Finance: ${fmt(breakdownStats.Finance.totalOutflow)} + Jain Mobiles: ${fmt(breakdownStats.Mobiles.totalOutflow)}`}>
+              <div className="text-[9px] font-mono text-muted-foreground/80 mt-1 truncate" title={`Jain Finance: ${fmt(breakdownStats.Finance.totalOutflow)} + Jain Mobiles: ${fmt(breakdownStats.Mobiles.totalOutflow)}`}>
                 {fmt(breakdownStats.Finance.totalOutflow)} (Fin) + {fmt(breakdownStats.Mobiles.totalOutflow)} (Mob)
               </div>
             )}
-            <p className="text-[10px] text-muted-foreground mt-0.5">Cash + bank payouts</p>
           </div>
-        </Card>
 
-        <Card className="p-4 border-l-4 border-l-warning flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Net Cash Flow</span>
-            <div className="bg-warning/15 p-1 rounded">
-              <Wallet className="size-4 text-warning" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className={`text-lg font-extrabold ${stats.netCash >= 0 ? "text-success" : "text-danger"}`}>
-              {stats.netCash >= 0 ? "+" : ""}{fmt(stats.netCash)}
-            </div>
-            {activeTab === "Combined" && (
-              <div className="text-[9px] font-mono text-muted-foreground/80 mt-0.5 truncate" title={`Jain Finance: ${fmtSigned(breakdownStats.Finance.netCash)} | Jain Mobiles: ${fmtSigned(breakdownStats.Mobiles.netCash)}`}>
-                {fmtSigned(breakdownStats.Finance.netCash)} (Fin) | {fmtSigned(breakdownStats.Mobiles.netCash)} (Mob)
+          <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-2 gap-2">
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/40">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-rose-500"></span> Outflow (Cash)
               </div>
-            )}
-            <p className="text-[10px] text-muted-foreground mt-0.5">Physical cash drawer balance</p>
-          </div>
-        </Card>
+              <div className="text-sm font-extrabold text-danger mt-0.5">{fmt(stats.cashOut)}</div>
+              {activeTab === "Combined" && (
+                <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5" title={`Fin: ${fmt(breakdownStats.Finance.cashOut)} | Mob: ${fmt(breakdownStats.Mobiles.cashOut)}`}>
+                  {fmt(breakdownStats.Finance.cashOut)} (Fin) + {fmt(breakdownStats.Mobiles.cashOut)} (Mob)
+                </div>
+              )}
+            </div>
 
-        <Card className="p-4 border-l-4 border-l-[oklch(0.62_0.14_250)] flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Net Bank Flow</span>
-            <div className="bg-info/15 p-1 rounded">
-              <Wallet className="size-4 text-info" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className={`text-lg font-extrabold ${stats.netBank >= 0 ? "text-success" : "text-danger"}`}>
-              {stats.netBank >= 0 ? "+" : ""}{fmt(stats.netBank)}
-            </div>
-            {activeTab === "Combined" && (
-              <div className="text-[9px] font-mono text-muted-foreground/80 mt-0.5 truncate" title={`Jain Finance: ${fmtSigned(breakdownStats.Finance.netBank)} | Jain Mobiles: ${fmtSigned(breakdownStats.Mobiles.netBank)}`}>
-                {fmtSigned(breakdownStats.Finance.netBank)} (Fin) | {fmtSigned(breakdownStats.Mobiles.netBank)} (Mob)
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/40">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-amber-500"></span> Outflow (Bank)
               </div>
-            )}
-            <p className="text-[10px] text-muted-foreground mt-0.5">Bank ledger balance change</p>
+              <div className="text-sm font-extrabold text-danger mt-0.5">{fmt(stats.bankOut)}</div>
+              {activeTab === "Combined" && (
+                <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5" title={`Fin: ${fmt(breakdownStats.Finance.bankOut)} | Mob: ${fmt(breakdownStats.Mobiles.bankOut)}`}>
+                  {fmt(breakdownStats.Finance.bankOut)} (Fin) + {fmt(breakdownStats.Mobiles.bankOut)} (Mob)
+                </div>
+              )}
+            </div>
           </div>
+          <p className="text-[10px] text-muted-foreground mt-2">Disbursals, expenses & supplier payouts</p>
         </Card>
 
-        <Card className="p-4 border-l-4 border-l-primary flex flex-col justify-between bg-primary/[0.02]">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-bold text-primary uppercase tracking-wider">Net Consolidated</span>
-            <div className="bg-primary/10 p-1.5 rounded-lg">
-              <IndianRupee className="size-4 text-primary" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className={`text-xl font-black ${stats.netConsolidated >= 0 ? "text-success" : "text-danger"}`}>
-              {stats.netConsolidated >= 0 ? "+" : ""}{fmt(stats.netConsolidated)}
+        {/* CARD 3: TOTAL INFLOW & TOTAL OUTFLOW (Consolidated Net) */}
+        <Card className="p-4 border-l-4 border-l-primary flex flex-col justify-between bg-gradient-to-br from-primary/[0.04] to-transparent shadow-sm">
+          <div>
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-xs font-bold text-primary uppercase tracking-wider">Total Inflow & Outflow</span>
+                <div className={`text-xl font-black mt-0.5 tracking-tight ${stats.netConsolidated >= 0 ? "text-success" : "text-danger"}`}>
+                  {stats.netConsolidated >= 0 ? "+" : ""}{fmt(stats.netConsolidated)}
+                </div>
+              </div>
+              <div className="bg-primary/10 p-2 rounded-lg text-primary">
+                <IndianRupee className="size-4" />
+              </div>
             </div>
             {activeTab === "Combined" && (
-              <div className="text-[9px] font-mono text-muted-foreground/80 mt-0.5 truncate" title={`Jain Finance: ${fmtSigned(breakdownStats.Finance.netConsolidated)} | Jain Mobiles: ${fmtSigned(breakdownStats.Mobiles.netConsolidated)}`}>
+              <div className="text-[9px] font-mono text-muted-foreground/80 mt-1 truncate" title={`Jain Finance: ${fmtSigned(breakdownStats.Finance.netConsolidated)} | Jain Mobiles: ${fmtSigned(breakdownStats.Mobiles.netConsolidated)}`}>
                 {fmtSigned(breakdownStats.Finance.netConsolidated)} (Fin) | {fmtSigned(breakdownStats.Mobiles.netConsolidated)} (Mob)
               </div>
             )}
-            <p className="text-[10px] text-muted-foreground mt-0.5">Grand total net balance flow</p>
           </div>
+
+          <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-2 gap-2">
+            <div className="bg-success/10 p-2.5 rounded-lg border border-success/20">
+              <div className="text-[10px] font-semibold text-success uppercase flex items-center gap-1">
+                <ArrowUpRight className="size-3" /> Total Inflow
+              </div>
+              <div className="text-sm font-extrabold text-success mt-0.5">{fmt(stats.totalInflow)}</div>
+              <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5">
+                All receipts sum
+              </div>
+            </div>
+
+            <div className="bg-danger/10 p-2.5 rounded-lg border border-danger/20">
+              <div className="text-[10px] font-semibold text-danger uppercase flex items-center gap-1">
+                <ArrowDownRight className="size-3" /> Total Outflow
+              </div>
+              <div className="text-sm font-extrabold text-danger mt-0.5">{fmt(stats.totalOutflow)}</div>
+              <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5">
+                All payouts sum
+              </div>
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2">Net Consolidated (Total Inflow − Outflow)</p>
+        </Card>
+
+        {/* CARD 4: NET CASH FLOW & NET BANK FLOW */}
+        <Card className="p-4 border-l-4 border-l-warning flex flex-col justify-between bg-gradient-to-br from-warning/[0.03] to-transparent shadow-sm">
+          <div>
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-xs font-bold text-warning uppercase tracking-wider">Net Cash & Bank Flow</span>
+                <div className="text-xs font-semibold text-muted-foreground mt-0.5">Physical drawer vs Bank ledger</div>
+              </div>
+              <div className="bg-warning/15 p-2 rounded-lg text-warning">
+                <Wallet className="size-4" />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-2 gap-2">
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/40">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-emerald-500"></span> Net Cash Flow
+              </div>
+              <div className={`text-sm font-extrabold mt-0.5 ${stats.netCash >= 0 ? "text-success" : "text-danger"}`}>
+                {stats.netCash >= 0 ? "+" : ""}{fmt(stats.netCash)}
+              </div>
+              {activeTab === "Combined" ? (
+                <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5" title={`Fin: ${fmtSigned(breakdownStats.Finance.netCash)} | Mob: ${fmtSigned(breakdownStats.Mobiles.netCash)}`}>
+                  {fmtSigned(breakdownStats.Finance.netCash)} F | {fmtSigned(breakdownStats.Mobiles.netCash)} M
+                </div>
+              ) : (
+                <div className="text-[8px] text-muted-foreground/75 mt-0.5 truncate">Cash drawer bal</div>
+              )}
+            </div>
+
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/40">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-sky-500"></span> Net Bank Flow
+              </div>
+              <div className={`text-sm font-extrabold mt-0.5 ${stats.netBank >= 0 ? "text-success" : "text-danger"}`}>
+                {stats.netBank >= 0 ? "+" : ""}{fmt(stats.netBank)}
+              </div>
+              {activeTab === "Combined" ? (
+                <div className="text-[8px] font-mono text-muted-foreground/75 truncate mt-0.5" title={`Fin: ${fmtSigned(breakdownStats.Finance.netBank)} | Mob: ${fmtSigned(breakdownStats.Mobiles.netBank)}`}>
+                  {fmtSigned(breakdownStats.Finance.netBank)} F | {fmtSigned(breakdownStats.Mobiles.netBank)} M
+                </div>
+              ) : (
+                <div className="text-[8px] text-muted-foreground/75 mt-0.5 truncate">Bank ledger bal</div>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2">Physical drawer vs Bank balance change</p>
         </Card>
       </div>
 

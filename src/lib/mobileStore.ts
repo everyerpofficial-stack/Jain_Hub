@@ -33,6 +33,18 @@ export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
     "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
     "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
   ],
+  "SecondHandPhone": [
+    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
+    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
+  ],
+  "Second Hand Phone": [
+    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
+    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
+  ],
+  "Second Hand Phones": [
+    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
+    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
+  ],
   "Basic Phones": [
     "Nokia", "Samsung", "Lava", "Itel", "Micromax", "Jio", "Karbonn"
   ],
@@ -44,6 +56,16 @@ export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
     "OnePlus", "Boult", "Portronics", "Zebronics", "pTron", "Mi / Xiaomi"
   ]
 };
+
+export const PRODUCT_CATEGORIES = [
+  "TV",
+  "Frize",
+  "Waching Machine",
+  "Smartphones",
+  "SecondHandPhone",
+  "Basic Phones",
+  "Tablets"
+] as const;
 
 export const DEFAULT_BRANDS_FALLBACK = [
   "Samsung", "Apple", "LG", "Sony", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Haier", "Whirlpool", "Godrej"

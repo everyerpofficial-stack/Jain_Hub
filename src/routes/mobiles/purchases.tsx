@@ -588,7 +588,7 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
                   onChange={(e) => setQuickCategory(e.target.value)}
                   className="mt-1 h-8 w-full rounded border border-border bg-surface px-2 focus:outline-none"
                 >
-                  {["TV", "Frize", "Waching Machine", "Smartphones", "Basic Phones", "Tablets"].map((cat) => (
+                  {["TV", "Frize", "Waching Machine", "Smartphones", "SecondHandPhone", "Basic Phones", "Tablets"].map((cat) => (
                     <option key={cat} value={cat}>{cat === "Frize" ? "Fridge (Frize)" : cat === "Waching Machine" ? "Washing Machine" : cat}</option>
                   ))}
                 </select>

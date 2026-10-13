@@ -32,6 +32,9 @@ function ProductDetailDialog({ p: product, onClose, onEdit }: { p: MobileProduct
     if (product.category === "Waching Machine") {
       return { spec: "Load Capacity", type: "Machine Type" };
     }
+    if (product.category === "SecondHandPhone") {
+      return { spec: "RAM / Storage", type: "Color / Condition" };
+    }
     return { spec: "RAM / Storage", type: "Color" };
   };
 
@@ -160,6 +163,9 @@ function ProductFormDialog({
       } else if (category === "Waching Machine") {
         setRamRomVal("7 kg");
         setColorVal("Top Load - Fully Automatic");
+      } else if (category === "SecondHandPhone") {
+        setRamRomVal("8GB/128GB");
+        setColorVal("Good Condition");
       } else {
         setRamRomVal("8GB/128GB");
         setColorVal("Default Color");
@@ -212,7 +218,7 @@ function ProductFormDialog({
               onChange={(e) => setCategory(e.target.value)}
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
-              {["TV", "Frize", "Waching Machine", "Smartphones", "Basic Phones", "Tablets"].map((cat) => (
+              {["TV", "Frize", "Waching Machine", "Smartphones", "SecondHandPhone", "Basic Phones", "Tablets"].map((cat) => (
                 <option key={cat} value={cat}>{cat === "Frize" ? "Fridge (Frize)" : cat === "Waching Machine" ? "Washing Machine" : cat}</option>
               ))}
             </select>
@@ -328,11 +334,11 @@ function ProductFormDialog({
           {category !== "TV" && category !== "Frize" && category !== "Waching Machine" && (
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
-                <span className="text-xs font-semibold text-muted-foreground">Color</span>
+                <span className="text-xs font-semibold text-muted-foreground">{category === "SecondHandPhone" ? "Color / Condition" : "Color"}</span>
                 <input
                   value={colorVal}
                   onChange={(e) => setColorVal(e.target.value)}
-                  placeholder="e.g. Titanium Blue"
+                  placeholder={category === "SecondHandPhone" ? "e.g. Space Black / Good Condition" : "e.g. Titanium Blue"}
                   className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
                 />
               </label>
@@ -401,6 +407,7 @@ function ProductsPage() {
 
   const [q, setQ] = useState("");
   const [selectedBrand, setSelectedBrand] = useState("All");
+  const [selectedCategory, setSelectedCategory] = useState("All");
   const [selected, setSelected] = useState<MobileProduct | null>(null);
   const [editing, setEditing] = useState<MobileProduct | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -430,12 +437,13 @@ function ProductsPage() {
 
   const filtered = products.filter((p) => {
     if (selectedBrand !== "All" && p.brand !== selectedBrand) return false;
+    if (selectedCategory !== "All" && p.category !== selectedCategory) return false;
     if (q) {
       const matchText = q.toLowerCase();
       // Coerced, not optional-chained: Sheets hands back a numeric model or
       // spec as a NUMBER, and .toLowerCase() on it threw mid-render — typing
       // in this box blanked the whole page.
-      return [p.name, p.brand, p.model, p.color, p.ramRom, p.remark].some((field) =>
+      return [p.name, p.brand, p.model, p.color, p.ramRom, p.category, p.remark].some((field) =>
         String(field ?? "").toLowerCase().includes(matchText)
       );
     }
@@ -513,6 +521,21 @@ function ProductsPage() {
               placeholder="Search by name, model, specs, barcode..."
               className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Filter Category:</span>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="h-9 min-w-[150px] rounded-md border border-border bg-surface px-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring/20 cursor-pointer"
+            >
+              <option value="All">All Categories ({products.length})</option>
+              {["Smartphones", "SecondHandPhone", "TV", "Frize", "Waching Machine", "Basic Phones", "Tablets"].map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat === "Frize" ? "Fridge (Frize)" : cat === "Waching Machine" ? "Washing Machine" : cat} ({products.filter((p) => p.category === cat).length})
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Filter Brand:</span>
