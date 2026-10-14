@@ -5,7 +5,7 @@ import { Plus, Download, Search, Eye, Edit, Trash2, Smartphone, Shield, Tag, Bar
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useMobileStore, MobileProduct, getBrandsForCategory } from "@/lib/mobileStore";
+import { useMobileStore, MobileProduct, getBrandsForCategory, formatCategoryName } from "@/lib/mobileStore";
 
 export const Route = createFileRoute("/mobiles/products")({
   head: () => ({
@@ -26,13 +26,13 @@ function ProductDetailDialog({ p: product, onClose, onEdit }: { p: MobileProduct
     if (product.category === "TV") {
       return { spec: "Screen Size", type: "Resolution / Panel" };
     }
-    if (product.category === "Frize") {
+    if (product.category === "Frize" || product.category === "Fridge") {
       return { spec: "Capacity", type: "Door & Rating" };
     }
-    if (product.category === "Waching Machine") {
+    if (product.category === "Waching Machine" || product.category === "Washing Machine") {
       return { spec: "Load Capacity", type: "Machine Type" };
     }
-    if (product.category === "SecondHandPhone") {
+    if (product.category === "SecondHandPhone" || product.category === "Second Hand Phone") {
       return { spec: "RAM / Storage", type: "Color / Condition" };
     }
     return { spec: "RAM / Storage", type: "Color" };
@@ -69,7 +69,7 @@ function ProductDetailDialog({ p: product, onClose, onEdit }: { p: MobileProduct
             </div>
             <div className="mt-1">
               <span className="text-[10px] text-muted-foreground font-semibold block uppercase tracking-wider">Category</span>
-              <span className="font-semibold text-foreground">{product.category}</span>
+              <span className="font-semibold text-foreground">{formatCategoryName(product.category)}</span>
             </div>
           </div>
 
@@ -137,7 +137,7 @@ function ProductFormDialog({
 
   useEffect(() => {
     if (product) {
-      setCategory(product.category || "TV");
+      setCategory(product.category === "SecondHandPhone" ? "Second Hand Phone" : product.category || "TV");
       setName(product.name);
       setBrand(product.brand);
       setModel(product.model);
@@ -163,7 +163,7 @@ function ProductFormDialog({
       } else if (category === "Waching Machine") {
         setRamRomVal("7 kg");
         setColorVal("Top Load - Fully Automatic");
-      } else if (category === "SecondHandPhone") {
+      } else if (category === "SecondHandPhone" || category === "Second Hand Phone") {
         setRamRomVal("8GB/128GB");
         setColorVal("Good Condition");
       } else {
@@ -218,7 +218,7 @@ function ProductFormDialog({
               onChange={(e) => setCategory(e.target.value)}
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
-              {["TV", "Frize", "Waching Machine", "Smartphones", "SecondHandPhone", "Basic Phones", "Tablets"].map((cat) => (
+              {["TV", "Frize", "Waching Machine", "Smartphones", "Second Hand Phone", "Basic Phones", "Tablets"].map((cat) => (
                 <option key={cat} value={cat}>{cat === "Frize" ? "Fridge (Frize)" : cat === "Waching Machine" ? "Washing Machine" : cat}</option>
               ))}
             </select>
@@ -334,11 +334,11 @@ function ProductFormDialog({
           {category !== "TV" && category !== "Frize" && category !== "Waching Machine" && (
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
-                <span className="text-xs font-semibold text-muted-foreground">{category === "SecondHandPhone" ? "Color / Condition" : "Color"}</span>
+                <span className="text-xs font-semibold text-muted-foreground">{category === "SecondHandPhone" || category === "Second Hand Phone" ? "Color / Condition" : "Color"}</span>
                 <input
                   value={colorVal}
                   onChange={(e) => setColorVal(e.target.value)}
-                  placeholder={category === "SecondHandPhone" ? "e.g. Space Black / Good Condition" : "e.g. Titanium Blue"}
+                  placeholder={category === "SecondHandPhone" || category === "Second Hand Phone" ? "e.g. Space Black / Good Condition" : "e.g. Titanium Blue"}
                   className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
                 />
               </label>
@@ -437,7 +437,16 @@ function ProductsPage() {
 
   const filtered = products.filter((p) => {
     if (selectedBrand !== "All" && p.brand !== selectedBrand) return false;
-    if (selectedCategory !== "All" && p.category !== selectedCategory) return false;
+    if (selectedCategory !== "All") {
+      const matchCat = (cat: string) => {
+        if (cat === selectedCategory) return true;
+        if ((selectedCategory === "Second Hand Phone" || selectedCategory === "SecondHandPhone") && (cat === "Second Hand Phone" || cat === "SecondHandPhone")) return true;
+        if ((selectedCategory === "Frize" || selectedCategory === "Fridge (Frize)") && (cat === "Frize" || cat === "Fridge")) return true;
+        if ((selectedCategory === "Waching Machine" || selectedCategory === "Washing Machine") && (cat === "Waching Machine" || cat === "Washing Machine")) return true;
+        return false;
+      };
+      if (!matchCat(p.category)) return false;
+    }
     if (q) {
       const matchText = q.toLowerCase();
       // Coerced, not optional-chained: Sheets hands back a numeric model or
@@ -530,9 +539,9 @@ function ProductsPage() {
               className="h-9 min-w-[150px] rounded-md border border-border bg-surface px-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring/20 cursor-pointer"
             >
               <option value="All">All Categories ({products.length})</option>
-              {["Smartphones", "SecondHandPhone", "TV", "Frize", "Waching Machine", "Basic Phones", "Tablets"].map((cat) => (
+              {["Smartphones", "Second Hand Phone", "TV", "Frize", "Waching Machine", "Basic Phones", "Tablets"].map((cat) => (
                 <option key={cat} value={cat}>
-                  {cat === "Frize" ? "Fridge (Frize)" : cat === "Waching Machine" ? "Washing Machine" : cat} ({products.filter((p) => p.category === cat).length})
+                  {cat === "Frize" ? "Fridge (Frize)" : cat === "Waching Machine" ? "Washing Machine" : cat} ({products.filter((p) => p.category === cat || ((cat === "Second Hand Phone" || cat === "SecondHandPhone") && (p.category === "Second Hand Phone" || p.category === "SecondHandPhone"))).length})
                 </option>
               ))}
             </select>
@@ -601,7 +610,7 @@ function ProductsPage() {
                         <div className="text-xs text-muted-foreground">{p.color}</div>
                       </td>
                       <td className="py-3 px-4 font-medium text-foreground/80">{p.ramRom}</td>
-                      <td className="py-3 px-4 text-muted-foreground">{p.category}</td>
+                      <td className="py-3 px-4 text-muted-foreground">{formatCategoryName(p.category)}</td>
                       <td className="py-3 px-4 text-right font-medium text-muted-foreground">{formatInr(p.purchasePrice)}</td>
                       <td className="py-3 px-4 text-center font-bold">{qty}</td>
                       <td className="py-3 px-4">

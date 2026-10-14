@@ -62,10 +62,19 @@ export const PRODUCT_CATEGORIES = [
   "Frize",
   "Waching Machine",
   "Smartphones",
+  "Second Hand Phone",
   "SecondHandPhone",
   "Basic Phones",
   "Tablets"
 ] as const;
+
+export function formatCategoryName(cat?: string): string {
+  if (!cat) return "";
+  if (cat === "Frize" || cat === "Fridge") return "Fridge (Frize)";
+  if (cat === "Waching Machine" || cat === "Washing Machine") return "Washing Machine";
+  if (cat === "SecondHandPhone" || cat === "Second Hand Phone" || cat === "Second Hand Phones") return "Second Hand Phone";
+  return cat;
+}
 
 export const DEFAULT_BRANDS_FALLBACK = [
   "Samsung", "Apple", "LG", "Sony", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Haier", "Whirlpool", "Godrej"
@@ -76,6 +85,8 @@ export function getBrandsForCategory(category: string): string[] {
   if (BRANDS_BY_CATEGORY[category]) return BRANDS_BY_CATEGORY[category];
   const trimmed = category.trim();
   if (BRANDS_BY_CATEGORY[trimmed]) return BRANDS_BY_CATEGORY[trimmed];
+  const formatted = formatCategoryName(category);
+  if (BRANDS_BY_CATEGORY[formatted]) return BRANDS_BY_CATEGORY[formatted];
   return DEFAULT_BRANDS_FALLBACK;
 }
 

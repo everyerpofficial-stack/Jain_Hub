@@ -541,11 +541,22 @@ function CollectDialog() {
 
   const handleAmountChange = (valStr: string) => {
     setAmount(valStr);
-    const total = Number(valStr) || 0;
+    const total = Number(valStr);
+    const emi = customer?.perMonthEmi || 0;
+
+    // Auto-calculate discount as remaining balance when partial payment is entered (e.g. EMI 1407, paid 1200 -> discount 207)
+    if (emi > 0) {
+      if (valStr.trim() !== "" && !isNaN(total) && total > 0 && total < emi) {
+        setDiscount(String(emi - total));
+      } else if (total >= emi || valStr.trim() === "") {
+        setDiscount("");
+      }
+    }
+
     if (method === "Cash & Bank") {
-      const half = Math.floor(total / 2);
+      const half = Math.floor((Number(valStr) || 0) / 2);
       setCashAmount(half);
-      setBankAmount(total - half);
+      setBankAmount((Number(valStr) || 0) - half);
     }
   };
 
@@ -605,6 +616,26 @@ function CollectDialog() {
             <Field label="Payment Amount (₹)" value={amount} onChange={handleAmountChange} type="number" highlight />
             <Field label="Discount (₹)" value={discount} onChange={setDiscount} type="number" placeholder="0 (optional)" />
           </div>
+
+          {customer && Number(amount) > 0 && Number(amount) < customer.perMonthEmi && (
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 px-3 py-1.5 rounded-md border border-emerald-500/20 flex items-center justify-between animate-in fade-in duration-150">
+              <span>
+                Auto Discount: ₹{(customer.perMonthEmi - Number(amount)).toLocaleString("en-IN")}
+                {Number(discount) !== (customer.perMonthEmi - Number(amount)) && (
+                  <button
+                    type="button"
+                    onClick={() => setDiscount(String(customer.perMonthEmi - Number(amount)))}
+                    className="ml-2 underline text-primary cursor-pointer hover:opacity-80"
+                  >
+                    (Apply)
+                  </button>
+                )}
+              </span>
+              <span className="text-muted-foreground">
+                Total: ₹{((Number(amount) || 0) + (Number(discount) || 0)).toLocaleString("en-IN")} / ₹{customer.perMonthEmi.toLocaleString("en-IN")}
+              </span>
+            </div>
+          )}
           
           <div className="grid grid-cols-2 gap-3">
             <Select label="Payment Mode" value={method} onChange={handleMethodChange} options={["Cash", "Bank", "Cash & Bank"]} />
