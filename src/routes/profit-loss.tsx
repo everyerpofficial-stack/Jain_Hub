@@ -77,8 +77,10 @@ function ProfitLossPage() {
     return isDateInRange(eDate, startDate, endDate);
   });
 
+  // Capital belongs to the period it came in, not the one it matures in —
+  // filtering on maturity put this month's investment into some future year.
   const filteredInvestments = investments.filter((i) => {
-    const iDate = parseAppDate(i.maturity);
+    const iDate = parseAppDate(i.date || i.maturity);
     return isDateInRange(iDate, startDate, endDate);
   });
 

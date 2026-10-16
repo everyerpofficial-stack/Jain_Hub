@@ -126,7 +126,19 @@ function SalesPage() {
   );
 
   const isMobileValid = /^\d{10}$/.test(cMobile.trim());
-  const canCheckout = cName.trim() && isMobileValid && productId && !isBlacklisted && manualPrice;
+  // Same rules the purchase form already enforces. Without them a "Partial
+  // Paid" bill could record more money received than the bill was worth (or
+  // ₹0), and a Cash & UPI split that didn't add up went straight into the
+  // Cash & UPI flow as cash the shop never took.
+  const paymentError =
+    priceNum <= 0
+      ? "Enter a selling price above ₹0."
+      : paymentStatus === "Partial Paid" && !(autoAmountPaid > 0 && autoAmountPaid < finalTotal)
+        ? `Partial payment must be more than ₹0 and less than the bill total (₹${finalTotal.toLocaleString("en-IN")}).`
+        : paymentMethod === "Cash & UPI" && (splitCash ?? 0) + (splitUpi ?? 0) !== autoAmountPaid
+          ? `Cash + UPI portions must add up to the amount paid (₹${autoAmountPaid.toLocaleString("en-IN")}).`
+          : null;
+  const canCheckout = cName.trim() && isMobileValid && productId && !isBlacklisted && manualPrice && !paymentError;
 
   // Filter Sales History
   const filteredSales = (sales || []).filter((s) => {
@@ -829,7 +841,7 @@ function SalesPage() {
   };
 
   const handleCheckoutSubmit = () => {
-    if (!selectedProduct) return;
+    if (!selectedProduct || !canCheckout) return;
 
     const sale = createBill({
       customerId: "",
@@ -1368,6 +1380,9 @@ function SalesPage() {
               )}
             </div>
 
+            {productId && paymentError && (
+              <p className="mt-4 text-[11px] font-medium text-danger">{paymentError}</p>
+            )}
             <button
               disabled={!canCheckout}
               onClick={handleCheckoutSubmit}

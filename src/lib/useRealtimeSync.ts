@@ -14,6 +14,7 @@ import { useEffect, useRef } from "react";
 import {
   useStore, recalculateLoanStatuses, seedStaff,
   loanRow, profitTransactionRow, customerRow, paymentRow, documentRow, auditRow, auditFromRow,
+  parseAmount,
 } from "./store";
 import {
   useMobileStore,
@@ -23,8 +24,13 @@ import {
   itemsFromSheet, safeItems,
   mobileSettingsRow, MOBILE_SETTINGS_ROW_ID,
 } from "./mobileStore";
-import { digestSheets, readSheet, upsertRow, type SheetName, type SheetRow } from "./googleSheets";
-import { isSheetBusy, isIdDeleted, isSheetUnavailable, recordSheetIds, wasSeenOnSheet, isLocallyRecent } from "./syncQueue";
+import { digestSheets, readSheet, upsertRow, type ResetEpochs, type SheetName, type SheetRow } from "./googleSheets";
+import {
+  isSheetBusy, isIdDeleted, isSheetUnavailable, recordSheetIds, wasSeenOnSheet, isLocallyRecent,
+  clearSyncState, getKnownEpoch, setKnownEpoch, getResetGeneration, isResetInProgress, onStaleEpoch,
+  isCreatedHere, renameCreatedHere,
+  SYNC_MODULES, type SyncModule,
+} from "./syncQueue";
 import { toOptionalNumber } from "./ledger";
 import { toast } from "sonner";
 
@@ -63,11 +69,13 @@ export async function triggerManualSync(forceAll = false): Promise<boolean> {
 }
 
 /**
- * Safe non-destructive reconciliation helper:
- * Combines Google Sheets rows with un-synced local records.
- * - Prevents wiping local data if Google Sheets returns 0 rows.
- * - Preserves local records that have not been explicitly deleted by the user.
- * - Re-uploads local un-synced records to Google Sheets.
+ * Merge a fresh sheet read with this device's copy of the same table:
+ * - Sheet rows win for every id the sheet has.
+ * - Local records the sheet lacks are kept and re-uploaded if they never
+ *   reached it, and dropped if they were seen there before (deleted elsewhere).
+ * - With `identity`, a record THIS device created whose id now holds a
+ *   different record on the sheet (an id clash with another device) is
+ *   renumbered and re-uploaded rather than lost.
  */
 function safeReconcile<T extends { id?: string }>(
   url: string,
@@ -88,7 +96,14 @@ function safeReconcile<T extends { id?: string }>(
   // Deliberately loose: callers pass the domain row builders (saleRow,
   // purchaseRow, ...) while `rows` here are sanitised sheet rows, so the two
   // sides never line up nominally.
-  toRow: (item: any) => SheetRow = (item) => item as SheetRow
+  toRow: (item: any) => SheetRow = (item) => item as SheetRow,
+  /**
+   * The fields that make two records "the same record", normalised so a sheet
+   * round-trip cannot change them (Sheets turns "₹1,660" into 1660 and dates
+   * into Date cells). Only for tables whose records are never edited in those
+   * fields after creation; a mismatch then can only mean an id clash.
+   */
+  identity?: (item: any) => string
 ) {
   const push = (item: T) => {
     // The deployed script rejects this tab outright — re-offering every local
@@ -105,23 +120,16 @@ function safeReconcile<T extends { id?: string }>(
     }
   };
 
-  // 1. If sheet returns 0 rows:
-  if (rows.length === 0 && localList.length > 0) {
-    // Only re-upload items that have NEVER been seen on the sheet before or were recently created locally.
-    const genuinelyUnsynced = localList.filter(
-      (item) => item && item.id && !isIdDeleted(sheet, String(item.id)) && (!wasSeenOnSheet(sheet, String(item.id)) || isLocallyRecent(sheet, String(item.id)))
-    );
+  // An empty sheet goes through the same rules as any other read. It used to
+  // be special-cased as "keep everything local", which is exactly why a
+  // database cleared from one device stayed visible on the others — and why
+  // they then wrote it back: the first edit or EMI payment on a stale record
+  // re-upserted it (and its customer) for the whole shop. The per-record rules
+  // below are already safe for an empty read: records this device created and
+  // never saw on the sheet are kept and pushed; only records it HAS seen there
+  // before are treated as deleted.
 
-    if (genuinelyUnsynced.length > 0) {
-      for (const item of genuinelyUnsynced) {
-        push(item);
-      }
-      setter(() => ({ [key]: genuinelyUnsynced }));
-    }
-    return;
-  }
-
-  // 2. Map of sheet items by ID
+  // Map of sheet items by ID
   const sheetMap = new Map<string, T>(rows.map((r) => [String(r.id), r]));
 
   // Remember what the sheet holds right now.
@@ -133,12 +141,28 @@ function safeReconcile<T extends { id?: string }>(
   // Start with rows from Google Sheets
   const merged: T[] = [...rows];
 
+  const usedIds = new Set<string>([...rows, ...localList].map((r) => String(r?.id ?? "")).filter(Boolean));
+  const renumbered: string[] = [];
+
   // 3. Decide what to do with each local record the sheet does not have.
   let removedRemotely = 0;
   for (const loc of localList) {
     if (!loc || !loc.id) continue;
     const idStr = String(loc.id);
-    if (sheetMap.has(idStr)) continue;
+    if (sheetMap.has(idStr)) {
+      // Another device allocated the same id and its upsert replaced ours on
+      // the sheet. Give our record the next free id and upload it again.
+      if (identity && isCreatedHere(sheet, idStr) && identity(loc) !== identity(sheetMap.get(idStr))) {
+        const newId = nextFreeId(idStr, usedIds);
+        usedIds.add(newId);
+        const moved = { ...loc, id: newId } as T;
+        renameCreatedHere(sheet, idStr, newId);
+        merged.push(moved);
+        push(moved);
+        renumbered.push(`${idStr} → ${newId}`);
+      }
+      continue;
+    }
 
     // Deleted on this device; the delete may still be in flight.
     if (isIdDeleted(sheet, idStr)) continue;
@@ -168,7 +192,17 @@ function safeReconcile<T extends { id?: string }>(
 
   if (localJSON !== mergedJSON) {
     setter(() => ({ [key]: merged }));
-    const newFromSheetCount = rows.filter((r) => !localList.some((l) => String(l.id) === String(r.id))).length;
+    if (renumbered.length > 0) {
+      toast.warning("Record number clash with another device", {
+        description: `Both devices used the same number at the same time. This device's entry was renumbered so neither is lost: ${renumbered.join(", ")}.`,
+        duration: 15000,
+      });
+    }
+    // Straight after adopting a reset the whole module reloads; one summary
+    // toast already said why, so a "new records" toast per tab is just noise.
+    if (quietPrefixes.some((p) => sheet.startsWith(p))) return;
+    const localIds = new Set(localList.map((l) => String(l?.id)));
+    const newFromSheetCount = rows.filter((r) => !localIds.has(String(r.id))).length;
     if (newFromSheetCount > 0) {
       toast.info(`↓ ${newFromSheetCount} new records synced from ${sheet}`);
     }
@@ -180,10 +214,168 @@ function safeReconcile<T extends { id?: string }>(
   }
 }
 
+/** Next unused id with the same prefix as `id` ("TXN-0152" → "TXN-0153" or higher). */
+function nextFreeId(id: string, used: Set<string>): string {
+  const prefix = id.replace(/\d+$/, "");
+  const width = Math.max(3, id.length - prefix.length);
+  let max = 0;
+  for (const u of used) {
+    if (!u.startsWith(prefix)) continue;
+    const n = Number(u.slice(prefix.length));
+    if (Number.isInteger(n) && n > max) max = n;
+  }
+  return prefix + String(max + 1).padStart(width, "0");
+}
+
+/**
+ * Identities for the create-only tables (see safeReconcile's `identity`).
+ * Kept to fields Sheets cannot reformat: ids, digits and amounts.
+ */
+const text = (v: unknown) => String(v ?? "").trim().toLowerCase();
+const paymentIdentity = (p: any) => `${text(p.customerId)}|${text(p.loanId)}|${parseAmount(p.amount)}`;
+const expenseIdentity = (e: any) => `${text(e.cat)}|${text(e.type || "Expense")}|${parseAmount(e.amount)}`;
+const investmentIdentity = (i: any) => `${text(i.investor)}|${parseAmount(i.amount)}`;
+const profitTxnIdentity = (t: any) => `${text(t.type)}|${parseAmount(t.amount)}`;
+const saleIdentity = (s: any) => `${String(s.customerMobile ?? "").replace(/\D/g, "")}|${parseAmount(s.totalAmount)}`;
+const purchaseIdentity = (p: any) => `${text(p.supplierId || p.supplierName)}|${parseAmount(p.amount)}`;
+const supplierPaymentIdentity = (p: any) => `${text(p.supplierId || p.supplierName)}|${parseAmount(p.amount)}`;
+
 let globalDigestCache: Record<string, string | number> = {};
 
-export function resetRealtimeSyncCache() {
-  globalDigestCache = {};
+/** Sheet-name prefixes whose reconcile toasts are suppressed for the current poll. */
+let quietPrefixes: string[] = [];
+
+/** Forget the digest for one module (or all), so its sheets are re-read on the next poll. */
+export function resetRealtimeSyncCache(module?: SyncModule) {
+  if (!module) {
+    globalDigestCache = {};
+    return;
+  }
+  for (const k of Object.keys(globalDigestCache)) {
+    if (k.startsWith(`${module}_`)) delete globalDigestCache[k];
+  }
+}
+
+/** True if the module holds any records on this device. */
+function hasLocalData(module: SyncModule): boolean {
+  if (module === "Finance") {
+    const s = useStore.getState();
+    return [s.customers, s.payments, s.loans, s.expenses, s.investments, s.profitTransactions, s.documents]
+      .some((list) => (list?.length ?? 0) > 0);
+  }
+  const m = useMobileStore.getState();
+  return [m.sales, m.purchases, m.products, m.suppliers, m.customers, m.expenses, m.accessories, m.supplierPayments, m.warranties]
+    .some((list) => (list?.length ?? 0) > 0);
+}
+
+/**
+ * The module was cleared from another device (its server epoch moved past
+ * ours): drop this device's copy so it matches, and so none of it can be
+ * written back. Records added on any device AFTER the reset are then pulled in
+ * by the normal reconcile, because the module's digest cache is emptied too.
+ */
+function adoptRemoteReset(module: SyncModule, serverEpoch: number) {
+  const hadData = hasLocalData(module);
+  if (module === "Finance") useStore.getState().clearLocalData();
+  else useMobileStore.getState().clearLocalData();
+  clearSyncState(module);
+  resetRealtimeSyncCache(module);
+  setKnownEpoch(module, serverEpoch);
+  quietPrefixes.push(`${module}_`);
+  if (hadData) {
+    toast.warning(`${module} data was cleared from another device`, {
+      id: `remote-reset-${module}`,
+      description: "This device's copy has been removed to match the shared database.",
+      duration: 10000,
+    });
+  }
+}
+
+/**
+ * Compare the server's reset epochs with what this device last saw.
+ * `epochs` is null on a Code.gs too old to report them — nothing to compare.
+ */
+function applyServerEpochs(epochs: ResetEpochs | null) {
+  if (!epochs) return;
+  for (const module of SYNC_MODULES) {
+    const server = epochs[module];
+    if (server === undefined) continue;
+    const known = getKnownEpoch(module);
+    if (server > (known ?? 0)) {
+      // Includes a device that has never recorded an epoch (first run of this
+      // build) while the server has one: its local data may well predate that
+      // reset, and the sheet is the source of truth either way.
+      adoptRemoteReset(module, server);
+    } else if (known === undefined || server < known) {
+      // Never cleared, or the script's properties were reset — just align.
+      setKnownEpoch(module, server);
+    }
+  }
+}
+
+/**
+ * One sync pass: adopt any reset made on another device, then reconcile every
+ * sheet whose digest changed since the last pass. `isActive` lets the caller
+ * abandon the pass (e.g. the hook unmounted) after each network round-trip.
+ */
+export async function pollOnce(isActive: () => boolean = () => true): Promise<void> {
+  if (!isActive()) return;
+  // This device is clearing a module right now; see beginReset().
+  if (isResetInProgress()) return;
+
+  const activeUrl = useStore.getState().sheetsConfig.url || useMobileStore.getState().sheetsConfig.url;
+  if (!activeUrl) return;
+
+  try {
+    // Step 1: Get row counts & content fingerprints
+    const result = await digestSheets(activeUrl);
+    if (!result || !isActive() || isResetInProgress()) return;
+    const { digest } = result;
+
+    // Step 1b: a module cleared elsewhere must be wiped here before anything
+    // is reconciled, or the stale rows get merged — and pushed — back.
+    quietPrefixes = [];
+    applyServerEpochs(result.epochs);
+    const generation = getResetGeneration();
+
+    const prev = globalDigestCache;
+    const changedFinance  = Object.keys(digest).filter(
+      (k) => k.startsWith("Finance_") && String(digest[k]) !== String(prev[k] ?? "")
+    );
+    const changedMobiles = Object.keys(digest).filter(
+      (k) => k.startsWith("Mobiles_") && String(digest[k]) !== String(prev[k] ?? "")
+    );
+
+    globalDigestCache = { ...digest };
+
+    // Step 2: Fetch only changed sheets
+    const deferred: string[] = [];
+    if (changedFinance.length > 0) {
+      deferred.push(...await reconcileFinance(activeUrl, changedFinance, generation));
+    }
+    if (changedMobiles.length > 0) {
+      deferred.push(...await reconcileMobiles(activeUrl, changedMobiles, generation));
+    }
+
+    // A reset landed while this pass was reading: what it read is stale.
+    // Re-read every sheet next time rather than trust this pass.
+    if (generation !== getResetGeneration()) {
+      globalDigestCache = {};
+      return;
+    }
+
+    for (const sheet of deferred) delete globalDigestCache[sheet];
+
+    const reconciledAny =
+      changedFinance.length + changedMobiles.length - deferred.length > 0;
+    if (reconciledAny) {
+      useStore.getState().updateSheetsConfig({ lastSync: new Date().toLocaleTimeString("en-IN") });
+    }
+  } catch (err) {
+    console.warn("[RealtimeSync] Poll error:", err);
+  } finally {
+    quietPrefixes = [];
+  }
 }
 
 export function useRealtimeSync() {
@@ -215,50 +407,32 @@ export function useRealtimeSync() {
 
     pollerRunning = true;
 
-    const poll = async () => {
-      if (!isMountedRef.current) return;
-
-      const activeUrl = useStore.getState().sheetsConfig.url || useMobileStore.getState().sheetsConfig.url;
-      if (!activeUrl) return;
-
-      try {
-        // Step 1: Get row counts & content fingerprints
-        const digest = await digestSheets(activeUrl);
-        if (!digest || !isMountedRef.current) return;
-
-        const prev = globalDigestCache;
-        const changedFinance  = Object.keys(digest).filter(
-          (k) => k.startsWith("Finance_") && String(digest[k]) !== String(prev[k] ?? "")
-        );
-        const changedMobiles = Object.keys(digest).filter(
-          (k) => k.startsWith("Mobiles_") && String(digest[k]) !== String(prev[k] ?? "")
-        );
-
-        globalDigestCache = { ...digest };
-
-        // Step 2: Fetch only changed sheets
-        const deferred: string[] = [];
-        if (changedFinance.length > 0) {
-          deferred.push(...await reconcileFinance(activeUrl, changedFinance));
-        }
-        if (changedMobiles.length > 0) {
-          deferred.push(...await reconcileMobiles(activeUrl, changedMobiles));
-        }
-
-        for (const sheet of deferred) delete globalDigestCache[sheet];
-
-        const reconciledAny =
-          changedFinance.length + changedMobiles.length - deferred.length > 0;
-        if (reconciledAny) {
-          useStore.getState().updateSheetsConfig({ lastSync: new Date().toLocaleTimeString("en-IN") });
-        }
-
-      } catch (err) {
-        console.warn("[RealtimeSync] Poll error:", err);
+    // Focus and visibilitychange both fire on returning to the tab, on top of
+    // the interval — two polls used to run side by side, reconciling the same
+    // sheets and racing each other's writes to the store. Overlapping calls
+    // now share the running poll and queue at most one follow-up.
+    let inFlight: Promise<void> | null = null;
+    let queued = false;
+    const isActive = () => isMountedRef.current;
+    const poll = (): Promise<void> => {
+      if (inFlight) {
+        queued = true;
+        return inFlight;
       }
+      inFlight = pollOnce(isActive).finally(() => {
+        inFlight = null;
+        if (queued && isMountedRef.current) {
+          queued = false;
+          void poll();
+        }
+      });
+      return inFlight;
     };
 
     globalPollFn = poll;
+    // A write refused as STALE_EPOCH means a reset happened elsewhere — pick
+    // it up now rather than at the next 20-second tick.
+    onStaleEpoch(() => { void poll(); });
 
     // Initial poll almost immediately (100ms)
     const initialTimer = setTimeout(poll, 100);
@@ -278,6 +452,7 @@ export function useRealtimeSync() {
       isMountedRef.current = false;
       pollerRunning = false;
       globalPollFn = null;
+      onStaleEpoch(null);
       clearTimeout(initialTimer);
       clearInterval(interval);
       window.removeEventListener("focus", handleFocusOrVisibility);
@@ -288,7 +463,7 @@ export function useRealtimeSync() {
 }
 
 // ── Finance reconciliation ──────────────────────────────────────────────────
-async function reconcileFinance(url: string, sheets: string[]): Promise<string[]> {
+async function reconcileFinance(url: string, sheets: string[], generation: number): Promise<string[]> {
   const deferred: string[] = [];
   const setFin = (fn: (s: any) => any) => useStore.setState(fn);
 
@@ -296,6 +471,8 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
     if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
       const rows = await readSheet(url, sheet as SheetName);
+      // Data cleared (here or remotely) while this read was in flight.
+      if (generation !== getResetGeneration() || isResetInProgress()) return deferred;
 
       // Read state AFTER the await, once per sheet. A snapshot taken before the
       // loop goes stale the moment an earlier iteration writes, or the operator
@@ -346,7 +523,7 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
           cashAmount: r.cashAmount !== undefined && r.cashAmount !== "" ? Number(r.cashAmount) || 0 : undefined,
           bankAmount: r.bankAmount !== undefined && r.bankAmount !== "" ? Number(r.bankAmount) || 0 : undefined,
         }));
-        safeReconcile(url, "Finance_Payments", sanitized, finState.payments, setFin, "payments", paymentRow);
+        safeReconcile(url, "Finance_Payments", sanitized, finState.payments, setFin, "payments", paymentRow, paymentIdentity);
       }
 
       if (sheet === "Finance_Loans") {
@@ -379,7 +556,7 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
         safeReconcile(
           url, "Finance_ProfitTransactions", sanitized,
           useStore.getState().profitTransactions || [], setFin, "profitTransactions",
-          profitTransactionRow
+          profitTransactionRow, profitTxnIdentity
         );
       }
 
@@ -403,11 +580,11 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
       }
 
       if (sheet === "Finance_Expenses") {
-        safeReconcile(url, "Finance_Expenses", rows as any[], finState.expenses, setFin, "expenses");
+        safeReconcile(url, "Finance_Expenses", rows as any[], finState.expenses, setFin, "expenses", undefined, expenseIdentity);
       }
 
       if (sheet === "Finance_Investments") {
-        safeReconcile(url, "Finance_Investments", rows as any[], finState.investments, setFin, "investments");
+        safeReconcile(url, "Finance_Investments", rows as any[], finState.investments, setFin, "investments", undefined, investmentIdentity);
       }
 
       if (sheet === "Finance_Audit") {
@@ -477,12 +654,14 @@ async function reconcileFinance(url: string, sheets: string[]): Promise<string[]
 }
 
 // ── Mobiles reconciliation ──────────────────────────────────────────────────
-async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]> {
+async function reconcileMobiles(url: string, sheets: string[], generation: number): Promise<string[]> {
   const deferred: string[] = [];
   for (const sheet of sheets) {
     if (isSheetBusy(sheet)) { deferred.push(sheet); continue; }
     try {
       const rawRows = await readSheet(url, sheet as SheetName);
+      // Data cleared (here or remotely) while this read was in flight.
+      if (generation !== getResetGeneration() || isResetInProgress()) return deferred;
 
       const localSalesById = new Map(useMobileStore.getState().sales.map((x: any) => [String(x?.id), x]));
       const localPurchasesById = new Map(useMobileStore.getState().purchases.map((x: any) => [String(x?.id), x]));
@@ -596,14 +775,14 @@ async function reconcileMobiles(url: string, sheets: string[]): Promise<string[]
         }
       }
 
-      if (sheet === "Mobiles_Sales")            safeReconcile(url, "Mobiles_Sales",            rows, mobState.sales,            setMob, "sales", saleRow);
-      if (sheet === "Mobiles_Purchases")        safeReconcile(url, "Mobiles_Purchases",        rows, mobState.purchases,        setMob, "purchases", purchaseRow);
+      if (sheet === "Mobiles_Sales")            safeReconcile(url, "Mobiles_Sales",            rows, mobState.sales,            setMob, "sales", saleRow, saleIdentity);
+      if (sheet === "Mobiles_Purchases")        safeReconcile(url, "Mobiles_Purchases",        rows, mobState.purchases,        setMob, "purchases", purchaseRow, purchaseIdentity);
       if (sheet === "Mobiles_Products")         safeReconcile(url, "Mobiles_Products",         rows, mobState.products,         setMob, "products", productRow);
       if (sheet === "Mobiles_Suppliers")        safeReconcile(url, "Mobiles_Suppliers",        rows, mobState.suppliers,        setMob, "suppliers", supplierRow);
       if (sheet === "Mobiles_Customers")        safeReconcile(url, "Mobiles_Customers",        rows, mobState.customers,        setMob, "customers", mobileCustomerRow);
-      if (sheet === "Mobiles_Expenses")         safeReconcile(url, "Mobiles_Expenses",         rows, mobState.expenses,         setMob, "expenses", mobileExpenseRow);
+      if (sheet === "Mobiles_Expenses")         safeReconcile(url, "Mobiles_Expenses",         rows, mobState.expenses,         setMob, "expenses", mobileExpenseRow, expenseIdentity);
       if (sheet === "Mobiles_Accessories")      safeReconcile(url, "Mobiles_Accessories",      rows, mobState.accessories,      setMob, "accessories", accessoryRow);
-      if (sheet === "Mobiles_SupplierPayments") safeReconcile(url, "Mobiles_SupplierPayments", rows, mobState.supplierPayments || [], setMob, "supplierPayments", supplierPaymentRow);
+      if (sheet === "Mobiles_SupplierPayments") safeReconcile(url, "Mobiles_SupplierPayments", rows, mobState.supplierPayments || [], setMob, "supplierPayments", supplierPaymentRow, supplierPaymentIdentity);
       if (sheet === "Mobiles_WarrantyClaims")   safeReconcile(url, "Mobiles_WarrantyClaims",   rows, mobState.warranties || [], setMob, "warranties", warrantyRow);
       if (sheet === "Mobiles_Audit")            safeReconcile(url, "Mobiles_Audit",            rows, mobState.audit || [],      setMob, "audit", mobileAuditRow);
 

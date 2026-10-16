@@ -137,7 +137,7 @@ function SettingsPage() {
 
   // Clear ALL data from both modules
   const handleClearAll = async () => {
-    if (!confirm("⚠️ WARNING: This will permanently delete ALL data from both Jain Finance AND Jain Mobiles modules.\n\nThis action cannot be undone.\n\nAre you absolutely sure?")) return;
+    if (!confirm("⚠️ WARNING: This will permanently delete ALL data from both Jain Finance AND Jain Mobiles modules — on this device and on every other device using the app.\n\nThis action cannot be undone.\n\nAre you absolutely sure?")) return;
     if (!confirm("Final confirmation: Delete ALL Finance AND Mobiles data now?")) return;
     setClearing(true);
     try {
@@ -474,13 +474,15 @@ function SettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={handleClearFinance}
-              className="h-10 px-4 rounded-md border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 text-xs font-semibold flex items-center justify-center gap-2 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors"
+              disabled={clearing}
+              className="h-10 px-4 rounded-md border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 text-xs font-semibold flex items-center justify-center gap-2 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors disabled:opacity-60"
             >
               <Trash2 className="size-3.5" /> Clear Finance Data
             </button>
             <button
               onClick={handleClearMobiles}
-              className="h-10 px-4 rounded-md border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 text-xs font-semibold flex items-center justify-center gap-2 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 transition-colors"
+              disabled={clearing}
+              className="h-10 px-4 rounded-md border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 text-xs font-semibold flex items-center justify-center gap-2 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 transition-colors disabled:opacity-60"
             >
               <Trash2 className="size-3.5" /> Clear Mobiles Data
             </button>

@@ -7,7 +7,10 @@ import { safeLocalStorage } from "./safeStorage";
 import XLSX from "xlsx-js-style";
 import { toast } from "sonner";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, clearSheets, readSheet, upsertRow, deleteRow, nowTimestamp, uploadFileToDrive, parseDataUrl } from "./googleSheets";
-import { enqueueWrite, markIdDeleted, clearSyncState } from "./syncQueue";
+import {
+  enqueueWrite, markIdDeleted, clearSyncState, beginReset, endReset, setKnownEpoch,
+  getResetGeneration, isResetInProgress, isStaleEpochError, notifyStaleEpoch, markCreatedHere,
+} from "./syncQueue";
 import { resetRealtimeSyncCache } from "./useRealtimeSync";
 import { nextSeqId, escapeHtml } from "./utils";
 
@@ -840,7 +843,8 @@ type State = {
   removeFromBlacklist: (id: string) => void;
   addLoan: (input: { customer: string; amount: number; deposit: number; interest: number; months: number; date?: string; product?: string }) => Loan;
   collectLoanPayment: (input: { loanId: string; amount: number; method: Payment["method"]; collector?: string; remarks?: string; date?: string }) => void;
-  recordPayment: (input: { customerId: string; amount: number; discount?: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => void;
+  /** Returns false (and records nothing) for an unknown or already fully-paid customer. */
+  recordPayment: (input: { customerId: string; amount: number; discount?: number; method: Payment["method"]; collector: string; remarks: string; date?: string; cashAmount?: number; bankAmount?: number }) => boolean;
   collectEmi: (input: { collectionId: string; method: Collection["method"] }) => void;
   receiveCustomPayment: (input: { customer: string; amount: number; method: Payment["method"]; collector: string }) => void;
   addExpense: (input: { cat: string; desc: string; amount: number; type?: "Income" | "Expense"; date?: string; method?: Expense["method"] }) => Expense;
@@ -850,6 +854,9 @@ type State = {
   markNotificationRead: (id: string) => void;
   pushNotification: (n: Omit<Notification, "id" | "time">) => void;
   pushAudit: (e: { action: string; target: string; user?: string; id?: string }) => void;
+  /** Empty every Finance table on THIS device only (staff kept). */
+  clearLocalData: () => void;
+  /** Clear Finance on the sheet, then here. Throws if the sheet could not be cleared. */
   resetSeed: () => Promise<void>;
   recheckStatuses: () => void;
   updateSheetsConfig: (cfg: Partial<SheetsConfig>) => void;
@@ -999,6 +1006,15 @@ function syncUpsert(get: () => State, sheet: SheetName, row: SheetRow, label: st
     void enqueueWrite(sheet, label, () => upsertRow(url, sheet, row));
   }
 }
+/**
+ * Upsert a record this device just CREATED. Recording it as ours lets the
+ * poller notice if another device allocated the same id at the same moment
+ * and overwrote it — and renumber ours instead of losing it (safeReconcile).
+ */
+function syncCreate(get: () => State, sheet: SheetName, row: SheetRow, label: string) {
+  markCreatedHere(sheet, String(row.id ?? ""));
+  syncUpsert(get, sheet, row, label);
+}
 function syncDelete(get: () => State, sheet: SheetName, id: string, label: string) {
   markIdDeleted(sheet, id);
   const { sheetsConfig } = get();
@@ -1007,6 +1023,18 @@ function syncDelete(get: () => State, sheet: SheetName, id: string, label: strin
     void enqueueWrite(sheet, label, () => deleteRow(url, sheet, id));
   }
 }
+
+/** Every Finance tab a Danger Zone clear empties. Finance_Staff is kept: it holds the logins. */
+const FINANCE_RESET_SHEETS: SheetName[] = [
+  "Finance_Customers",
+  "Finance_Payments",
+  "Finance_Expenses",
+  "Finance_Investments",
+  "Finance_ProfitTransactions",
+  "Finance_Loans",
+  "Finance_Documents",
+  "Finance_Audit",
+];
 
 // ── PERMANENT GOOGLE SHEETS DATABASE URL ─────────────────────────────────────
 // This URL is permanently baked into the app — no manual configuration needed.
@@ -1325,7 +1353,15 @@ export const useStore = create<State>()(
             // payment reverted the EMI count but left the due date advanced.
             const prevEmiDate = retreatEmiDate(cust.emiDate);
             const remainingPayments = get().payments.filter((x) => x.id !== id && x.customerId === p.customerId && x.status === "Success");
-            const lastP = remainingPayments[0];
+            // Latest by date, not the first in the array: payments reconciled
+            // from the sheet arrive oldest-first, so [0] was the customer's
+            // FIRST payment and "last payment" jumped back to it.
+            const lastP = remainingPayments.reduce<Payment | undefined>((best, x) => {
+              if (!best) return x;
+              const bx = parseAppDate(x.date)?.getTime() ?? 0;
+              const bb = parseAppDate(best.date)?.getTime() ?? 0;
+              return bx >= bb ? x : best;
+            }, undefined);
 
             set((s) => ({
               customers: recalculateStatuses(s.customers.map((c) =>
@@ -1873,7 +1909,12 @@ export const useStore = create<State>()(
 
       recordPayment: ({ customerId, amount, discount, method, collector, remarks, date, cashAmount, bankAmount }) => {
         const cust = get().customers.find((c) => c.id === customerId);
-        if (!cust) return;
+        if (!cust) return false;
+        // Every payment settles one instalment. On a closed account there is
+        // none left: paidEmis is capped below so it did not move, yet deleting
+        // that payment later still took one off — re-opening a fully paid loan
+        // with a phantom pending EMI.
+        if ((Number(cust.pendingEmis) || 0) <= 0) return false;
         const txnId = nextSeqId("TXN-", get().payments.map((x) => x.id));
         const newPaidEmis = Math.min(cust.paidEmis + 1, cust.noOfEmi);
         const newPendingEmis = cust.noOfEmi - newPaidEmis;
@@ -1922,11 +1963,12 @@ export const useStore = create<State>()(
         const newPayment = get().payments.find((p) => p.id === txnId);
         const updatedCust = get().customers.find((c) => c.id === customerId);
         if (newPayment) {
-          syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "payment");
+          syncCreate(get, "Finance_Payments", paymentRow(newPayment), "payment");
         }
         if (updatedCust) {
           syncUpsert(get, "Finance_Customers", customerRow(updatedCust), "customer sync (from payment)");
         }
+        return true;
       },
 
       addLoan: (input) => {
@@ -2011,7 +2053,7 @@ export const useStore = create<State>()(
           payments: [newPayment, ...s.payments],
         }));
 
-        syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "loan collection payment");
+        syncCreate(get, "Finance_Payments", paymentRow(newPayment), "loan collection payment");
         const updatedLoan = get().loans.find((l) => l.id === loanId);
         if (updatedLoan) syncUpsert(get, "Finance_Loans", loanRow(updatedLoan), "loan (from collection)");
       },
@@ -2037,7 +2079,7 @@ export const useStore = create<State>()(
         set((s) => ({
           payments: [newPayment, ...s.payments],
         }));
-        syncUpsert(get, "Finance_Payments", paymentRow(newPayment), "custom payment");
+        syncCreate(get, "Finance_Payments", paymentRow(newPayment), "custom payment");
       },
 
       addExpense: (input) => {
@@ -2060,7 +2102,7 @@ export const useStore = create<State>()(
           expenses: [expense, ...s.expenses],
           audit: [{ ts: new Date().toLocaleString("en-IN"), user: s.currentUser?.name || "System", action: `Added ${expense.type?.toLowerCase() || "expense"}`, target: `${id} · ${expense.amount}` }, ...s.audit],
         }));
-        syncUpsert(get, "Finance_Expenses", expenseRow(expense), "expense");
+        syncCreate(get, "Finance_Expenses", expenseRow(expense), "expense");
         return expense;
       },
 
@@ -2081,7 +2123,7 @@ export const useStore = create<State>()(
           investments: [investment, ...s.investments],
           audit: [{ ts: new Date().toLocaleString("en-IN"), user: s.currentUser?.name || "System", action: "Added investment", target: `${id} · ${investment.amount}` }, ...s.audit],
         }));
-        syncUpsert(get, "Finance_Investments", investmentRow(investment), "investment");
+        syncCreate(get, "Finance_Investments", investmentRow(investment), "investment");
         return investment;
       },
 
@@ -2126,7 +2168,7 @@ export const useStore = create<State>()(
           ],
         }));
 
-        syncUpsert(get, "Finance_ProfitTransactions", profitTransactionRow(txn), "profit withdrawal");
+        syncCreate(get, "Finance_ProfitTransactions", profitTransactionRow(txn), "profit withdrawal");
         return txn;
       },
 
@@ -2172,7 +2214,7 @@ export const useStore = create<State>()(
           ],
         }));
 
-        syncUpsert(get, "Finance_ProfitTransactions", profitTransactionRow(txn), "profit redeposit");
+        syncCreate(get, "Finance_ProfitTransactions", profitTransactionRow(txn), "profit redeposit");
         return txn;
       },
 
@@ -2223,40 +2265,43 @@ export const useStore = create<State>()(
         syncUpsert(get, "Finance_Audit", auditRow(entry), "finance audit log");
       },
 
-      resetSeed: async () => {
-        // 1. Reset local state to empty (NOT seed data). The staff directory
-        // is deliberately left untouched so user credentials remain intact.
+      clearLocalData: () => {
+        // Empty (NOT seed data). The staff directory is deliberately left
+        // untouched so user credentials remain intact.
         set({
           customers: [], loans: [], collections: [],
           payments: [], expenses: [], investments: [],
           profitTransactions: [],
           notifications: [], audit: [], documents: [],
         });
-        // 2. Clear sync tracking state and digest cache
-        clearSyncState();
-        resetRealtimeSyncCache();
+      },
 
-        // 3. Clear Google Sheets — write empty arrays to all Finance sheets
+      resetSeed: async () => {
         const { sheetsConfig } = get();
-        if (sheetsConfig.enabled && sheetsConfig.url) {
-          const financeSheets: SheetName[] = [
-            "Finance_Customers",
-            "Finance_Payments",
-            "Finance_Expenses",
-            "Finance_Investments",
-            "Finance_ProfitTransactions",
-            "Finance_Loans",
-            "Finance_Documents",
-            "Finance_Audit",
-          ];
-          const res = await clearSheets(sheetsConfig.url, financeSheets);
-          if (!res.ok) {
-            console.warn("[store] Google Sheets clear issue:", res.error);
-            toast.error(`Google Sheets clear notice: ${res.error}`);
+        // Keep the poller out until both sides are wiped (see beginReset).
+        beginReset();
+        try {
+          // Server first. This used to wipe the device first and only toast if
+          // the sheet clear then failed — so the page said "cleared" while the
+          // data was still on the sheet, and the next poll brought it all back.
+          if (sheetsConfig.enabled && sheetsConfig.url) {
+            const res = await clearSheets(sheetsConfig.url, FINANCE_RESET_SHEETS);
+            if (!res.ok) {
+              throw new Error(`Google Sheets could not be cleared, so nothing was deleted. ${res.error ?? ""}`.trim());
+            }
+            // Writes from now on carry the new epoch; every other device sees
+            // it on its next poll and wipes its own copy.
+            if (res.epochs?.Finance !== undefined) setKnownEpoch("Finance", res.epochs.Finance);
+            const ts = nowTimestamp();
+            set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           }
-          const ts = nowTimestamp();
-          set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
+          get().clearLocalData();
+          clearSyncState("Finance");
+          resetRealtimeSyncCache("Finance");
+        } finally {
+          endReset();
         }
+        get().pushAudit({ action: "Cleared all Finance data", target: "Danger Zone → Clear Finance Data" });
       },
 
       recheckStatuses: () => set((s) => ({
@@ -2291,6 +2336,12 @@ export const useStore = create<State>()(
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
         } catch (err: any) {
+          // This device still holds data from before a reset made elsewhere;
+          // the server refused to let it overwrite the cleared sheet.
+          if (isStaleEpochError(err)) {
+            notifyStaleEpoch();
+            return { ok: false, error: "Finance data was cleared from another device. This device is refreshing — nothing was uploaded." };
+          }
           return { ok: false, error: err?.message || String(err) };
         }
       },
@@ -2300,6 +2351,7 @@ export const useStore = create<State>()(
         if (!sheetsConfig.enabled || !sheetsConfig.url) {
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
+        const generation = getResetGeneration();
         try {
           const [custRows, payRows, expRows, invRows, staffRows, loanRows, profitRows, docRows, auditRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Finance_Customers"),
@@ -2312,6 +2364,11 @@ export const useStore = create<State>()(
             readSheet(sheetsConfig.url, "Finance_Documents"),
             readSheet(sheetsConfig.url, "Finance_Audit"),
           ]);
+          // The data was cleared (here or on another device) while these reads
+          // were in flight — applying them would put pre-reset rows back.
+          if (generation !== getResetGeneration() || isResetInProgress()) {
+            return { ok: false, error: "Finance data was cleared while loading. Please try again." };
+          }
           // Customers: parse all numeric fields (always update state, even if empty array)
           const sanitizedCust = custRows.map((r: any) => ({
             ...r,

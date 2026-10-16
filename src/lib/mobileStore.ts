@@ -1,11 +1,14 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { toast } from "sonner";
 import { safeLocalStorage } from "./safeStorage";
 import { formatDateToInr, parseAppDate, useStore } from "./store";
 import { type SheetsConfig, type SheetRow, type SheetName, writeSheet, clearSheets, readSheet, upsertRow, deleteRow, nowTimestamp } from "./googleSheets";
 import { nextSeqId } from "./utils";
-import { enqueueWrite, markIdDeleted, clearSyncState, markLocallyCreated, isLocallyRecent } from "./syncQueue";
+import {
+  enqueueWrite, markIdDeleted, clearSyncState, markLocallyCreated, isLocallyRecent,
+  beginReset, endReset, setKnownEpoch, getResetGeneration, isResetInProgress,
+  isStaleEpochError, notifyStaleEpoch, markCreatedHere,
+} from "./syncQueue";
 import { resetRealtimeSyncCache } from "./useRealtimeSync";
 import { splitByMethod, toOptionalNumber } from "./ledger";
 
@@ -378,6 +381,9 @@ interface MobilesState {
   updateWarrantyStatus: (id: string, status: MobileWarrantyClaim["status"]) => void;
   
   updateSettings: (s: Partial<MobileSettings>) => void;
+  /** Empty every Mobiles table on THIS device only. */
+  clearLocalData: () => void;
+  /** Clear Mobiles on the sheet, then here. Throws if the sheet could not be cleared. */
   resetAll: () => Promise<void>;
   sheetsConfig: SheetsConfig;
   updateSheetsConfig: (cfg: Partial<SheetsConfig>) => void;
@@ -692,6 +698,15 @@ function syncUpsert(get: () => MobilesState, sheet: SheetName, row: SheetRow, la
     void enqueueWrite(sheet, label, () => upsertRow(url, sheet, row));
   }
 }
+/**
+ * Upsert a record this device just CREATED. Recording it as ours lets the
+ * poller notice if another device allocated the same id at the same moment
+ * and overwrote it — and renumber ours instead of losing it (safeReconcile).
+ */
+function syncCreate(get: () => MobilesState, sheet: SheetName, row: SheetRow, label: string) {
+  markCreatedHere(sheet, String(row.id ?? ""));
+  syncUpsert(get, sheet, row, label);
+}
 function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label: string) {
   markIdDeleted(sheet, id);
   const { sheetsConfig } = get();
@@ -700,6 +715,21 @@ function syncDelete(get: () => MobilesState, sheet: SheetName, id: string, label
     void enqueueWrite(sheet, label, () => deleteRow(url, sheet, id));
   }
 }
+
+/** Every Mobiles tab a Danger Zone clear empties. */
+const MOBILES_RESET_SHEETS: SheetName[] = [
+  "Mobiles_Sales",
+  "Mobiles_Purchases",
+  "Mobiles_Expenses",
+  "Mobiles_Suppliers",
+  "Mobiles_SupplierPayments",
+  "Mobiles_Customers",
+  "Mobiles_Products",
+  "Mobiles_Accessories",
+  "Mobiles_WarrantyClaims",
+  "Mobiles_Settings",
+  "Mobiles_Audit",
+];
 
 // ── PERMANENT GOOGLE SHEETS DATABASE URL ─────────────────────────────────────
 const PERMANENT_SHEETS_URL =
@@ -997,7 +1027,7 @@ export const useMobileStore = create<MobilesState>()(
           supplierPayments: [newPayment, ...(state.supplierPayments || [])]
         }));
 
-        syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment");
+        syncCreate(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment");
         const updatedSupplier = get().suppliers.find((s) => s.id === supplier.id);
         if (updatedSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSupplier), "supplier balance (from payment)");
         affectedPurchases.forEach((ap) => {
@@ -1114,7 +1144,7 @@ export const useMobileStore = create<MobilesState>()(
         // adjustStock() calls above had nothing to increment.
         get().recomputeInventory();
 
-        syncUpsert(get, "Mobiles_Purchases", purchaseRow(newPurchase), "purchase");
+        syncCreate(get, "Mobiles_Purchases", purchaseRow(newPurchase), "purchase");
         
         pur.items.forEach((item) => {
           const updatedProduct = get().products.find((p) => p.id === item.productId);
@@ -1126,7 +1156,7 @@ export const useMobileStore = create<MobilesState>()(
           if (finalSupplier) syncUpsert(get, "Mobiles_Suppliers", supplierRow(finalSupplier), "supplier (from purchase)");
           if (amountPaid > 0) {
             const latestPayment = get().supplierPayments?.[0];
-            if (latestPayment) syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(latestPayment), "supplier payment (from purchase)");
+            if (latestPayment) syncCreate(get, "Mobiles_SupplierPayments", supplierPaymentRow(latestPayment), "supplier payment (from purchase)");
           }
         }
         get().pushAudit({
@@ -1196,7 +1226,7 @@ export const useMobileStore = create<MobilesState>()(
           const updatedSup = get().suppliers.find((s) => s.id === supplier.id);
           if (updatedSup) syncUpsert(get, "Mobiles_Suppliers", supplierRow(updatedSup), "supplier balance update");
         }
-        syncUpsert(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment log");
+        syncCreate(get, "Mobiles_SupplierPayments", supplierPaymentRow(newPayment), "supplier payment log");
         get().pushAudit({
           action: "Purchase Balance Payment",
           target: `Paid ₹${payAmt.toLocaleString("en-IN")} towards Invoice #${purchase.invoiceNo} (${purchase.supplierName})`,
@@ -1259,7 +1289,7 @@ export const useMobileStore = create<MobilesState>()(
         get().recomputeInventory();
 
         // addCustomer() above already syncs itself when it creates a new customer.
-        syncUpsert(get, "Mobiles_Sales", saleRow(newSale), "sale");
+        syncCreate(get, "Mobiles_Sales", saleRow(newSale), "sale");
         // adjustStock() above can flip a product's status (e.g. In Stock ->
         // Out of Stock) — sync each affected product row, same rationale as
         // the equivalent loop in recordPurchase.
@@ -1515,7 +1545,7 @@ export const useMobileStore = create<MobilesState>()(
         set((state) => ({
           expenses: [newExpense, ...state.expenses]
         }));
-        syncUpsert(get, "Mobiles_Expenses", mobileExpenseRow(newExpense), "expense");
+        syncCreate(get, "Mobiles_Expenses", mobileExpenseRow(newExpense), "expense");
         get().pushAudit({
           action: "Added Expense",
           target: `[${newExpense.type}] ${newExpense.cat}: ${newExpense.desc} · ${newExpense.amount}`,
@@ -1535,8 +1565,7 @@ export const useMobileStore = create<MobilesState>()(
         });
       },
 
-      resetAll: async () => {
-        // 1. Clear local state
+      clearLocalData: () => {
         set({
           products: [],
           inventory: [],
@@ -1552,34 +1581,30 @@ export const useMobileStore = create<MobilesState>()(
           expenses: [],
           audit: []
         });
-        // 2. Clear sync tracking state and digest cache
-        clearSyncState();
-        resetRealtimeSyncCache();
+      },
 
-        // 3. Clear Google Sheets — write empty arrays to all Mobiles sheets
+      resetAll: async () => {
         const { sheetsConfig } = get();
-        if (sheetsConfig.enabled && sheetsConfig.url) {
-          const mobileSheets: SheetName[] = [
-            "Mobiles_Sales",
-            "Mobiles_Purchases",
-            "Mobiles_Expenses",
-            "Mobiles_Suppliers",
-            "Mobiles_SupplierPayments",
-            "Mobiles_Customers",
-            "Mobiles_Products",
-            "Mobiles_Accessories",
-            "Mobiles_WarrantyClaims",
-            "Mobiles_Settings",
-            "Mobiles_Audit",
-          ];
-          const res = await clearSheets(sheetsConfig.url, mobileSheets);
-          if (!res.ok) {
-            console.warn("[mobileStore] Google Sheets clear issue:", res.error);
-            toast.error(`Google Sheets clear notice: ${res.error}`);
+        // Same order and guarantees as the Finance resetSeed: server first,
+        // and the poller kept out until both sides are empty.
+        beginReset();
+        try {
+          if (sheetsConfig.enabled && sheetsConfig.url) {
+            const res = await clearSheets(sheetsConfig.url, MOBILES_RESET_SHEETS);
+            if (!res.ok) {
+              throw new Error(`Google Sheets could not be cleared, so nothing was deleted. ${res.error ?? ""}`.trim());
+            }
+            if (res.epochs?.Mobiles !== undefined) setKnownEpoch("Mobiles", res.epochs.Mobiles);
+            const ts = nowTimestamp();
+            set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           }
-          const ts = nowTimestamp();
-          set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
+          get().clearLocalData();
+          clearSyncState("Mobiles");
+          resetRealtimeSyncCache("Mobiles");
+        } finally {
+          endReset();
         }
+        get().pushAudit({ action: "Cleared all Mobiles data", target: "Danger Zone → Clear Mobiles Data" });
       },
 
       updateSheetsConfig: (cfg) => set((s) => ({ sheetsConfig: { ...s.sheetsConfig, ...cfg } })),
@@ -1609,6 +1634,10 @@ export const useMobileStore = create<MobilesState>()(
           set((s) => ({ sheetsConfig: { ...s.sheetsConfig, lastSync: ts } }));
           return { ok: true };
         } catch (err: any) {
+          if (isStaleEpochError(err)) {
+            notifyStaleEpoch();
+            return { ok: false, error: "Mobiles data was cleared from another device. This device is refreshing — nothing was uploaded." };
+          }
           return { ok: false, error: err?.message || String(err) };
         }
       },
@@ -1618,6 +1647,7 @@ export const useMobileStore = create<MobilesState>()(
         if (!sheetsConfig.enabled || !sheetsConfig.url) {
           return { ok: false, error: "Google Sheets sync is not configured or disabled." };
         }
+        const generation = getResetGeneration();
         try {
           const [salesRows, expRows, supRows, supPayRows, custRows, prodRows, purRows, accRows, warRows, setRows, auditRows] = await Promise.all([
             readSheet(sheetsConfig.url, "Mobiles_Sales"),
@@ -1632,6 +1662,10 @@ export const useMobileStore = create<MobilesState>()(
             readSheet(sheetsConfig.url, "Mobiles_Settings"),
             readSheet(sheetsConfig.url, "Mobiles_Audit"),
           ]);
+          // Cleared (here or elsewhere) while these reads were in flight.
+          if (generation !== getResetGeneration() || isResetInProgress()) {
+            return { ok: false, error: "Mobiles data was cleared while loading. Please try again." };
+          }
           const localSalesById = new Map(get().sales.map((x) => [String(x?.id), x]));
           const sanitizedSales = salesRows.map((r: any) => {
             const parsedItems = itemsFromSheet(r.items, localSalesById.get(String(r.id))?.items);

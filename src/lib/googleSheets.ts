@@ -17,6 +17,8 @@
  *   GET ?action=sendOtp&email=X&otp=Y               → send OTP email
  */
 
+import { epochForSheet, type SyncModule } from "./syncQueue";
+
 export interface SheetsConfig {
   /** Deployed Apps Script Web App URL (from "Deploy > New deployment") */
   url: string;
@@ -50,6 +52,22 @@ export type SheetName =
 
 /** Generic row — each value is serialised to string in the sheet */
 export type SheetRow = Record<string, string | number | boolean | undefined | null>;
+
+/** Reset epoch per module, as reported by Code.gs (absent on older deployments). */
+export type ResetEpochs = Partial<Record<SyncModule, number>>;
+
+function parseEpochs(raw: unknown): ResetEpochs | null {
+  if (!raw || typeof raw !== "object") return null;
+  const out: ResetEpochs = {};
+  for (const m of ["Finance", "Mobiles"] as const) {
+    const n = Number((raw as Record<string, unknown>)[m]);
+    if (Number.isFinite(n) && n >= 0) out[m] = n;
+  }
+  return out;
+}
+
+/** Actions that change a sheet — each one is stamped with the module's reset epoch. */
+const WRITE_ACTIONS = new Set(["write", "append", "upsert", "delete"]);
 
 /** Max bytes per GET request chunk (URL limit safety) */
 const CHUNK_BYTES = 40_000;
@@ -96,7 +114,13 @@ async function getFromScript(
   params: Record<string, string>
 ): Promise<Record<string, unknown>> {
   const apiKey = getApiKey();
-  const allParams = apiKey ? { ...params, key: apiKey } : params;
+  const allParams: Record<string, string> = apiKey ? { ...params, key: apiKey } : { ...params };
+  // Callers that span several requests (chunked writes) pass the epoch they
+  // started with, so a reset landing midway cannot re-stamp the later chunks.
+  if (WRITE_ACTIONS.has(allParams.action) && allParams.sheet && allParams.epoch === undefined) {
+    const epoch = epochForSheet(allParams.sheet);
+    if (epoch !== undefined) allParams.epoch = String(epoch);
+  }
   const qs = Object.entries(allParams)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&");
@@ -149,6 +173,8 @@ async function writeChunked(
   }
   if (current.length > 0) chunks.push(current);
 
+  const epoch = epochForSheet(sheet);
+
   // First chunk: use the requested action (write/append)
   // Subsequent chunks: always append (to add to what was written)
   for (let i = 0; i < chunks.length; i++) {
@@ -158,6 +184,7 @@ async function writeChunked(
       action: chunkAction,
       sheet,
       payload,
+      ...(epoch !== undefined ? { epoch: String(epoch) } : {}),
     });
   }
 }
@@ -236,20 +263,34 @@ export async function writeSheet(
 /**
  * Reliably clear multiple sheets in Google Sheets.
  * Uses atomic 'clearSheets' action if available, falling back to sequential writes with pause.
+ *
+ * `epochs` is the server's new reset epoch per module; it is absent when the
+ * deployed Code.gs predates reset epochs (or only the fallback path worked).
  */
 export async function clearSheets(
   url: string,
   sheets: SheetName[]
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; epochs?: ResetEpochs }> {
   if (!url || sheets.length === 0) return { ok: true };
 
-  try {
-    const res = await getFromScript(url, { action: "clearSheets", sheets: sheets.join(",") });
-    if (res.status === "ok") {
-      return { ok: true };
+  // Only an "Unknown action" reply means the deployment is too old for
+  // clearSheets. Anything else (lock contention, a bad key, offline) used to
+  // drop into the fallback as well — which clears the tabs WITHOUT starting a
+  // new reset epoch, so other devices never learned about the reset.
+  let lastError = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await getFromScript(url, { action: "clearSheets", sheets: sheets.join(",") });
+      return { ok: true, epochs: parseEpochs(res.epochs) ?? undefined };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (/unknown action/i.test(lastError)) break;
+      if (/unauthorized/i.test(lastError)) return { ok: false, error: lastError };
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
-  } catch {
-    // Action clearSheets not supported by older deployment, fallback to sequential clears below
+  }
+  if (!/unknown action/i.test(lastError)) {
+    return { ok: false, error: lastError || "Google Sheets could not be reached" };
   }
 
   // Fallback: Clear sheets sequentially (NOT parallel) to prevent LockService contention
@@ -349,11 +390,16 @@ export async function pingScript(url: string): Promise<{ ok: boolean; error?: st
 /**
  * Get row counts for all sheets in a single call.
  * Used by the polling engine to detect if anything changed without pulling full data.
+ * `epochs` is null when the deployed Code.gs predates reset epochs.
  */
-export async function digestSheets(url: string): Promise<Record<string, number> | null> {
+export async function digestSheets(
+  url: string
+): Promise<{ digest: Record<string, string | number>; epochs: ResetEpochs | null } | null> {
   try {
     const result = await getFromScript(url, { action: "digest" });
-    return (result.digest as Record<string, number>) ?? null;
+    const digest = result.digest as Record<string, string | number> | undefined;
+    if (!digest) return null;
+    return { digest, epochs: parseEpochs(result.epochs) };
   } catch {
     return null;
   }

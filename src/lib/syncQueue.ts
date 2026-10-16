@@ -58,6 +58,32 @@ function isSheetNotAllowed(err: unknown): boolean {
   return /sheet not allowed/i.test(msg);
 }
 
+/** Code.gs refused the write because the module was cleared after this device last synced. */
+export function isStaleEpochError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /^STALE_EPOCH/i.test(msg);
+}
+
+/**
+ * Called when the server reports this device is holding pre-reset data, so the
+ * realtime poller can pick up the reset straight away instead of at its next
+ * 20-second tick. Registered by useRealtimeSync (which imports this module, so
+ * it cannot be imported from here).
+ */
+let staleEpochHandler: (() => void) | null = null;
+export function onStaleEpoch(handler: (() => void) | null): void {
+  staleEpochHandler = handler;
+}
+
+export function notifyStaleEpoch(): void {
+  toast.warning("Database was cleared from another device", {
+    id: "stale-epoch",
+    description: "Your last change was not saved because this device still had the old data. It is refreshing now — please re-enter the change if it is still needed.",
+    duration: 10000,
+  });
+  staleEpochHandler?.();
+}
+
 /** In-flight write count per sheet. */
 const inFlight = new Map<string, number>();
 /** Timestamp (ms) when a sheet's last write settled. */
@@ -97,6 +123,10 @@ export function enqueueWrite(
   run: () => Promise<void>
 ): Promise<boolean> {
   inFlight.set(sheet, (inFlight.get(sheet) ?? 0) + 1);
+  // A write belongs to the dataset that existed when it was made. If the
+  // module is reset while it is still retrying, the retry would carry the NEW
+  // epoch and slip a pre-reset row past the server's guard — so drop it.
+  const generation = resetGeneration;
 
   const attempt = async (): Promise<boolean> => {
     // Already known-rejected by the deployed script — don't retry or re-toast.
@@ -104,6 +134,7 @@ export function enqueueWrite(
 
     let lastErr: unknown;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      if (generation !== resetGeneration) return false;
       try {
         await run();
         return true;
@@ -112,11 +143,19 @@ export function enqueueWrite(
         // A tab the script doesn't whitelist will never succeed — retrying
         // just multiplies the noise.
         if (isSheetNotAllowed(err)) break;
+        // The module was cleared elsewhere; retrying cannot succeed.
+        if (isStaleEpochError(err)) break;
         // Nothing to retry against while the device is offline — fail fast
         // and let the user know rather than burning the backoff budget.
         if (isOffline()) break;
         if (i < MAX_ATTEMPTS - 1) await sleep(BACKOFF_MS[i] ?? 1800);
       }
+    }
+
+    if (isStaleEpochError(lastErr)) {
+      // Already reset locally since this write was queued: nothing to report.
+      if (generation === resetGeneration) notifyStaleEpoch();
+      return false;
     }
 
     if (isSheetNotAllowed(lastErr)) {
@@ -269,15 +308,165 @@ export function clearSeenId(sheet: string, id: string): void {
   }
 }
 
-/** Clear all tracked seen IDs, deleted IDs, and in-flight/settled states (used when clearing database). */
-export function clearSyncState(): void {
-  seenCache = new Map();
-  deletedIdsRegistry.clear();
-  localCreationTimes.clear();
-  inFlight.clear();
-  settledAt.clear();
-  safeLocalStorage.removeItem(SEEN_IDS_KEY);
+/**
+ * Ids of records CREATED on this device, per sheet — persisted, newest last.
+ *
+ * Ids are allocated as "highest id on this device + 1", so two devices that
+ * record a payment (or a sale, an expense…) within the same poll window both
+ * pick e.g. TXN-0152, and the second upsert silently overwrites the first on
+ * the sheet: one payment simply vanishes. The poller uses this list to spot
+ * that — a record we created whose id now holds someone else's record — and
+ * renumbers ours instead of letting it be lost. Only our own creations are
+ * ever renumbered, so two devices never both "rescue" the same record.
+ */
+const CREATED_IDS_KEY = "jain-sync-created-ids";
+const MAX_CREATED_PER_SHEET = 1_000;
+let createdCache: Map<string, string[]> | null = null;
+
+function loadCreated(): Map<string, string[]> {
+  if (createdCache) return createdCache;
+  createdCache = new Map();
+  const raw = safeLocalStorage.getItem(CREATED_IDS_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      for (const [sheet, ids] of Object.entries(parsed)) {
+        if (Array.isArray(ids)) createdCache.set(sheet, ids.map(String));
+      }
+    } catch {
+      // Corrupt entry — start over; the cost is only missing a clash.
+    }
+  }
+  return createdCache;
 }
 
+function persistCreated(): void {
+  safeLocalStorage.setItem(CREATED_IDS_KEY, JSON.stringify(Object.fromEntries(loadCreated())));
+}
+
+export function markCreatedHere(sheet: string, id: string): void {
+  if (!sheet || !id) return;
+  const list = (loadCreated().get(sheet) ?? []).filter((x) => x !== id);
+  list.push(id);
+  loadCreated().set(sheet, list.length > MAX_CREATED_PER_SHEET ? list.slice(-MAX_CREATED_PER_SHEET) : list);
+  persistCreated();
+}
+
+export function isCreatedHere(sheet: string, id: string): boolean {
+  return loadCreated().get(sheet)?.includes(id) ?? false;
+}
+
+/** The record was renumbered after an id clash; track it under its new id. */
+export function renameCreatedHere(sheet: string, oldId: string, newId: string): void {
+  const list = (loadCreated().get(sheet) ?? []).filter((x) => x !== oldId && x !== newId);
+  list.push(newId);
+  loadCreated().set(sheet, list);
+  persistCreated();
+}
+
+export type SyncModule = "Finance" | "Mobiles";
+export const SYNC_MODULES: SyncModule[] = ["Finance", "Mobiles"];
+
+export function moduleOfSheet(sheet: string): SyncModule | null {
+  if (sheet.startsWith("Finance_")) return "Finance";
+  if (sheet.startsWith("Mobiles_")) return "Mobiles";
+  return null;
+}
+
+/**
+ * Bumped every time a module's data is wiped on this device (by this device's
+ * own Clear, or by adopting a reset made elsewhere). Anything async that read
+ * state before the wipe — a poll halfway through its sheets, a write still
+ * retrying — compares against this and abandons its stale result.
+ */
+let resetGeneration = 0;
+export function getResetGeneration(): number {
+  return resetGeneration;
+}
+
+/**
+ * Forget every piece of sync bookkeeping for one module (or all of them).
+ * Used when that module's data is cleared, so ids seen before the reset don't
+ * make the poller treat brand-new records with recycled ids as "deleted".
+ */
+export function clearSyncState(module?: SyncModule): void {
+  resetGeneration++;
+  const matches = (key: string) => !module || key.startsWith(`${module}_`);
+
+  for (const sheet of [...loadSeen().keys()]) if (matches(sheet)) loadSeen().delete(sheet);
+  persistSeen();
+  for (const sheet of [...loadCreated().keys()]) if (matches(sheet)) loadCreated().delete(sheet);
+  persistCreated();
+  for (const key of [...deletedIdsRegistry]) if (matches(key)) deletedIdsRegistry.delete(key);
+  for (const key of [...localCreationTimes.keys()]) if (matches(key)) localCreationTimes.delete(key);
+  for (const key of [...inFlight.keys()]) if (matches(key)) inFlight.delete(key);
+  for (const key of [...settledAt.keys()]) if (matches(key)) settledAt.delete(key);
+}
+
+/**
+ * A Clear from Settings is in progress on this device. The poller stands down
+ * meanwhile: a read that lands between the server wipe and the local wipe
+ * would otherwise pour the old rows straight back into local state.
+ */
+let resetsInProgress = 0;
+export function beginReset(): void {
+  resetsInProgress++;
+}
+export function endReset(): void {
+  resetsInProgress = Math.max(0, resetsInProgress - 1);
+}
+export function isResetInProgress(): boolean {
+  return resetsInProgress > 0;
+}
+
+/**
+ * The reset epoch of each module as last seen from the server (see
+ * RESET EPOCHS in Code.gs). Sent with every write so the server can refuse one
+ * made from pre-reset data, and compared on every poll to notice a reset made
+ * from another device.
+ *
+ * Cached in memory per tab on purpose: two tabs share localStorage, and if a
+ * second tab read the value the first tab just stored it would conclude there
+ * was nothing to adopt and keep showing — and persisting — the old data.
+ */
+const EPOCHS_KEY = "jain-sync-reset-epochs";
+let epochCache: Partial<Record<SyncModule, number>> | null = null;
+
+function loadEpochs(): Partial<Record<SyncModule, number>> {
+  if (epochCache) return epochCache;
+  epochCache = {};
+  const raw = safeLocalStorage.getItem(EPOCHS_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      for (const m of SYNC_MODULES) {
+        const n = Number(parsed?.[m]);
+        if (Number.isFinite(n) && n >= 0) epochCache[m] = n;
+      }
+    } catch {
+      // Corrupt entry — treat as never synced.
+    }
+  }
+  return epochCache;
+}
+
+/** Undefined when this device has never heard the server's epoch for the module. */
+export function getKnownEpoch(module: SyncModule): number | undefined {
+  return loadEpochs()[module];
+}
+
+export function setKnownEpoch(module: SyncModule, epoch: number): void {
+  const all = loadEpochs();
+  if (all[module] === epoch) return;
+  all[module] = epoch;
+  safeLocalStorage.setItem(EPOCHS_KEY, JSON.stringify(all));
+}
+
+/** The epoch to stamp on a write to this sheet, or undefined when none applies. */
+export function epochForSheet(sheet: string): number | undefined {
+  const m = moduleOfSheet(sheet);
+  if (!m) return undefined;
+  return getKnownEpoch(m) ?? 0;
+}
 
 

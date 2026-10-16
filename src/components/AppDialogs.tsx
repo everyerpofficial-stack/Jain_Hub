@@ -1,7 +1,7 @@
 // All action dialogs for the ERP. Mounted once from __root.tsx.
 // Each dialog is opened via the useUi() store.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { create } from "zustand";
 import { toast } from "sonner";
 import {
@@ -119,8 +119,21 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function PrimaryBtn({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  // Every dialog closes itself on submit, but Radix keeps the content (and this
+  // button) clickable through its exit animation — so a quick double-click
+  // recorded the same payment, expense or loan twice.
+  const busy = useRef(false);
   return (
-    <button type="button" onClick={onClick} disabled={disabled}
+    <button type="button" disabled={disabled}
+      onClick={() => {
+        if (busy.current) return;
+        busy.current = true;
+        try {
+          onClick();
+        } finally {
+          setTimeout(() => { busy.current = false; }, 800);
+        }
+      }}
       className="h-9 px-5 rounded-md bg-foreground text-background text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity">
       {children}
     </button>
@@ -498,6 +511,11 @@ function CollectDialog() {
 
   const customer = customers.find((c) => c.id === customerId);
   const isOpen = open === "collect" || open === "payment";
+  // All instalments paid: nothing left for a payment to settle (recordPayment refuses it too).
+  const isClosedAccount = !!customer && (Number(customer.pendingEmis) || 0) <= 0;
+  // The two portions are what the Cash & UPI flow books; they must add up to the payment.
+  const splitMismatch =
+    method === "Cash & Bank" && (Number(cashAmount) || 0) + (Number(bankAmount) || 0) !== (Number(amount) || 0);
 
   // Initialise ONCE per opening. This effect used to depend on `customers`,
   // `staff` and `currentUser`, so any background sync while the dialog was
@@ -612,6 +630,12 @@ function CollectDialog() {
             </div>
           )}
 
+          {isClosedAccount && (
+            <div className="text-[11px] font-medium text-danger bg-danger/10 px-3 py-1.5 rounded-md border border-danger/20">
+              All {customer?.noOfEmi} EMIs of this account are already paid — there is no instalment left to record a payment against.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Payment Amount (₹)" value={amount} onChange={handleAmountChange} type="number" highlight />
             <Field label="Discount (₹)" value={discount} onChange={setDiscount} type="number" placeholder="0 (optional)" />
@@ -667,6 +691,11 @@ function CollectDialog() {
                   setCashAmount(Math.max(0, total - b));
                 }}
               />
+              {splitMismatch && (
+                <p className="col-span-2 text-[11px] font-medium text-danger">
+                  Cash ₹{(Number(cashAmount) || 0).toLocaleString("en-IN")} + Bank ₹{(Number(bankAmount) || 0).toLocaleString("en-IN")} must equal the payment amount ₹{(Number(amount) || 0).toLocaleString("en-IN")}.
+                </p>
+              )}
             </div>
           )}
 
@@ -678,17 +707,23 @@ function CollectDialog() {
         <DialogFooter>
           <GhostBtn onClick={close}>Cancel</GhostBtn>
           <PrimaryBtn
-            disabled={!customerId || !(Number(amount) > 0) || !date || (collector === "Other (Manual Entry)" && !customCollectorName.trim())}
+            disabled={!customerId || !(Number(amount) > 0) || !date || isClosedAccount || splitMismatch || (collector === "Other (Manual Entry)" && !customCollectorName.trim())}
             onClick={() => {
               const activeCollector = collector === "Other (Manual Entry)" ? customCollectorName.trim() : collector;
               const finalRemarks = method === "Cash & Bank"
                 ? `${remarks ? remarks + " " : ""}[Cash: ₹${cashAmount} | Bank: ₹${bankAmount}]`
                 : remarks;
-              recordPayment({
+              const recorded = recordPayment({
                 customerId, amount: Number(amount), discount: Number(discount) || 0, method: method as Payment["method"], collector: activeCollector, remarks: finalRemarks, date,
                 cashAmount: method === "Cash & Bank" ? Number(cashAmount) || 0 : undefined,
                 bankAmount: method === "Cash & Bank" ? Number(bankAmount) || 0 : undefined,
               });
+              if (!recorded) {
+                toast.error("Payment not recorded", {
+                  description: "This customer has no pending EMI left (or was removed on another device).",
+                });
+                return;
+              }
               toast.success(`₹${Number(amount).toLocaleString("en-IN")} (${method}) recorded for ${customer?.name}`);
               close();
             }}

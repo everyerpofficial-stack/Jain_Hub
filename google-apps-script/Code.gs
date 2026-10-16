@@ -52,6 +52,13 @@
  *                                                                  (preferred over write/append for
  *                                                                  single-record add/edit — see below)
  *   ?action=delete&sheet=<name>&id=<rowId>&key=<API_KEY>        → delete row by ID
+ *   ?action=clearSheets&sheets=<a,b,c>&key=<API_KEY>            → wipe tabs + start a new reset epoch
+ *
+ *  RESET EPOCHS:
+ *   Every write/append/upsert/delete carries &epoch=<n>, the reset epoch the
+ *   device last saw for that module. clearSheets bumps the module's epoch, and
+ *   any later write still carrying an older epoch is refused with STALE_EPOCH —
+ *   that is what stops a device holding pre-reset data from writing it back.
  * =====================================================================
  */
 
@@ -181,7 +188,7 @@ function doGet(e) {
             digest[sheetNameItem] = rowCount + "_" + sampleStr.length + "_" + colCount;
           }
         }
-        return jsonResponse({ status: "ok", digest: digest });
+        return jsonResponse({ status: "ok", digest: digest, epochs: getResetEpochs_() });
       } catch (digestErr) {
         return jsonResponse({ status: "error", error: "Digest failed: " + digestErr.toString() });
       }
@@ -333,12 +340,17 @@ function doGet(e) {
     }
 
     // ── 3b. Clear multiple sheets in one atomic operation ────────────
+    // Also starts a new reset epoch for every module touched. Emptying the
+    // tabs alone was not enough: other devices still held the old rows locally
+    // and wrote them straight back (an EMI payment on a deleted customer
+    // re-upserted that customer), so a "cleared" database refilled itself.
     if (action === "clearSheets") {
       var sheetsParam = (e && e.parameter && e.parameter.sheets) || "";
       if (!sheetsParam) return jsonResponse({ status: "error", error: "Missing 'sheets' param" });
       var targetSheets = sheetsParam.split(",").map(function(s) { return s.trim(); }).filter(Boolean);
       var ssClear = SpreadsheetApp.openById(SPREADSHEET_ID);
       var clearedCount = 0;
+      var resetModules = {};
       for (var ci = 0; ci < targetSheets.length; ci++) {
         var sName = targetSheets[ci];
         if (isAllowed(sName)) {
@@ -347,9 +359,24 @@ function doGet(e) {
             shClear.clearContents();
             clearedCount++;
           }
+          var mod = moduleOfSheet_(sName);
+          if (mod && !isEpochExempt_(sName)) resetModules[mod] = true;
         }
       }
-      return jsonResponse({ status: "ok", cleared: clearedCount });
+      var props = PropertiesService.getScriptProperties();
+      var current = getResetEpochs_();
+      for (var m in resetModules) {
+        // Strictly increasing even if two clears land in the same millisecond.
+        var next = Math.max(new Date().getTime(), (current[m] || 0) + 1);
+        props.setProperty(EPOCH_PROPERTY_PREFIX + m.toUpperCase(), String(next));
+      }
+      return jsonResponse({ status: "ok", cleared: clearedCount, epochs: getResetEpochs_() });
+    }
+
+    // ── 3c. Refuse writes from a device still holding pre-reset data ──
+    if (action === "write" || action === "append" || action === "upsert" || action === "delete") {
+      var staleError = staleEpochError_(sheetName, e && e.parameter ? e.parameter.epoch : "");
+      if (staleError) return jsonResponse({ status: "error", error: staleError, epochs: getResetEpochs_() });
     }
 
     // ── 4. Write rows (clear + rewrite) ───────────────────────────────
@@ -609,6 +636,47 @@ function cellValue(v) {
     try { return JSON.stringify(v); } catch (e) { return String(v); }
   }
   return v;
+}
+
+// ── Reset epochs ──────────────────────────────────────────────────────────────
+// One number per module, kept in Script Properties: the time that module was
+// last cleared from Settings → Danger Zone. 0 means "never cleared".
+var EPOCH_PROPERTY_PREFIX = "RESET_EPOCH_";
+
+function moduleOfSheet_(name) {
+  if (String(name).indexOf("Finance_") === 0) return "Finance";
+  if (String(name).indexOf("Mobiles_") === 0) return "Mobiles";
+  return "";
+}
+
+// The staff directory survives a data reset (it holds the logins), so a write
+// to it is never stale.
+function isEpochExempt_(name) {
+  return name === "Finance_Staff";
+}
+
+function getResetEpochs_() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    Finance: Number(props.getProperty(EPOCH_PROPERTY_PREFIX + "FINANCE") || 0) || 0,
+    Mobiles: Number(props.getProperty(EPOCH_PROPERTY_PREFIX + "MOBILES") || 0) || 0,
+  };
+}
+
+// Returns an error message when the caller's epoch predates the module's last
+// reset, or "" when the write may proceed. A missing epoch counts as 0, so an
+// old cached copy of the app (which never sends one) cannot refill a cleared
+// module either; until the first reset every write is accepted as before.
+function staleEpochError_(sheetName, rawEpoch) {
+  var mod = moduleOfSheet_(sheetName);
+  if (!mod || isEpochExempt_(sheetName)) return "";
+  var serverEpoch = getResetEpochs_()[mod] || 0;
+  if (serverEpoch <= 0) return "";
+  var clientEpoch = Number(rawEpoch || 0) || 0;
+  if (clientEpoch >= serverEpoch) return "";
+  return "STALE_EPOCH: " + mod + " data was cleared on " +
+    Utilities.formatDate(new Date(serverEpoch), Session.getScriptTimeZone(), "dd MMM yyyy HH:mm") +
+    ". This device must refresh before it can save.";
 }
 
 // ── Helper: is sheet name in the whitelist? ───────────────────────────────────
