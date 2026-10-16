@@ -10,6 +10,7 @@ import { type ReactNode, useState, useEffect, useRef } from "react";
 import { useUi } from "@/components/AppDialogs";
 import { useStore } from "@/lib/store";
 import { useMobileStore } from "@/lib/mobileStore";
+import { triggerManualSync } from "@/lib/useRealtimeSync";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -96,8 +97,47 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
   const [q, setQ] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const sidebarNavRef = useRef<HTMLElement>(null);
+
+  const handleRefresh = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      if (!sheetsEnabled && sheetsUrl) {
+        useStore.getState().updateSheetsConfig({ enabled: true });
+        useMobileStore.getState().updateSheetsConfig({ enabled: true });
+      }
+
+      const ok = await triggerManualSync(true);
+      if (ok) {
+        const time = new Date().toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        });
+        toast.success("Data refreshed successfully", {
+          description: `Synced with Google Sheets at ${time}`,
+        });
+      } else if (!sheetsUrl) {
+        toast.warning("Google Sheets URL not configured", {
+          description: "Configure Google Sheets in Settings to enable live sync.",
+        });
+      } else {
+        toast.error("Sync could not complete", {
+          description: "Could not fetch data from Google Sheets. Using local records.",
+        });
+      }
+    } catch (err: any) {
+      toast.error("Failed to refresh", {
+        description: err?.message || "An unexpected error occurred.",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Apply dark mode class on mount from persisted state
   useEffect(() => {
@@ -218,6 +258,26 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
         )}
       </div>
 
+      {/* Sync Status Banner in Sidebar */}
+      {sheetsUrl && (
+        <div className="px-4 py-2 border-b border-border/60 bg-muted/10 flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-1.5 text-muted-foreground truncate">
+            <span className={`size-1.5 rounded-full shrink-0 ${isSyncing ? "bg-amber-500 animate-ping" : sheetsLastSync ? "bg-emerald-500" : "bg-muted-foreground"}`} />
+            <span className="truncate">{isSyncing ? "Syncing with Sheets…" : sheetsLastSync ? `Synced: ${sheetsLastSync}` : "Live Sync Active"}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={isSyncing}
+            className="text-[10px] font-semibold text-primary hover:underline disabled:opacity-50 flex items-center gap-1 shrink-0 ml-2"
+            title="Refresh from Google Sheets"
+          >
+            <RefreshCw className={`size-2.5 ${isSyncing ? "animate-spin text-primary" : ""}`} />
+            {isSyncing ? "Syncing…" : "Sync"}
+          </button>
+        </div>
+      )}
+
       <nav ref={sidebarNavRef} className="flex-1 overflow-y-auto px-3 py-2.5 space-y-3.5">
         {activeNav.map((g) => {
           const visibleItems = g.items.filter(
@@ -265,6 +325,15 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
           <div className="text-sm font-medium truncate">{currentUser?.name || "Rishi Rathod"}</div>
           <div className="text-[11px] text-muted-foreground truncate">{currentUser?.role || "Administrator"}</div>
         </div>
+        <button
+          onClick={handleRefresh}
+          disabled={isSyncing}
+          className="size-7 rounded-md border border-border grid place-items-center hover:bg-accent transition-colors disabled:opacity-50"
+          title={sheetsLastSync ? `Last synced: ${sheetsLastSync} · Click to refresh` : "Refresh data from Google Sheets"}
+          aria-label="Refresh data"
+        >
+          <RefreshCw className={`size-3.5 ${isSyncing ? "animate-spin text-primary" : ""}`} />
+        </button>
         <button
           onClick={toggleDarkMode}
           className="size-7 rounded-md border border-border grid place-items-center hover:bg-accent transition-colors"
@@ -323,50 +392,53 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
       {/* Main */}
       <main className="flex-1 min-w-0 w-full lg:pl-64 flex flex-col min-h-screen">
         <div className="border-b border-border bg-surface/60 backdrop-blur sticky top-0 z-10 print:hidden">
-          <div className="px-2 sm:px-4 lg:px-8 py-3 sm:py-3.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+          <div className="px-2 sm:px-4 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               {/* Mobile hamburger */}
               <button
-                className="lg:hidden size-9 rounded-md border border-border grid place-items-center hover:bg-accent shrink-0"
+                className="lg:hidden size-9 rounded-md border border-border bg-surface grid place-items-center hover:bg-accent shrink-0 transition-colors"
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Open menu"
               >
                 <Menu className="size-4" />
               </button>
-              <div className="flex items-center gap-1.5 text-sm min-w-0">
-                <span className="font-semibold tracking-tight truncate max-w-[100px] sm:max-w-none">{isMobileModule ? "Jain Mobiles" : "Jain Finance"}</span>
+              <div className="flex items-center gap-1 text-sm min-w-0">
+                <span className="font-semibold tracking-tight truncate max-w-[85px] xs:max-w-[120px] sm:max-w-none">{isMobileModule ? "Jain Mobiles" : "Jain Finance"}</span>
                 {breadcrumb && (
                   <>
                     <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground truncate max-w-[80px] sm:max-w-none">{breadcrumb}</span>
+                    <span className="text-muted-foreground truncate max-w-[70px] xs:max-w-[100px] sm:max-w-none">{breadcrumb}</span>
                   </>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              {/* Live Sync Status Pill */}
-              {sheetsUrl && sheetsEnabled && (
-                <div
-                  title={sheetsLastSync ? `Last synced: ${sheetsLastSync}` : "Waiting for first sync…"}
-                  className={`hidden sm:flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border transition-all ${
-                    sheetsLastSync
-                      ? "border-success/40 bg-success/10 text-success"
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* Live Sync Status Pill (Desktop/Tablet) */}
+              {sheetsUrl && (
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={isSyncing}
+                  title={sheetsLastSync ? `Last synced: ${sheetsLastSync} · Click to refresh` : "Waiting for first sync… Click to refresh"}
+                  className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-all hover:opacity-85 active:scale-95 disabled:opacity-50 cursor-pointer ${
+                    sheetsEnabled && sheetsLastSync
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                       : "border-border bg-muted/40 text-muted-foreground"
                   }`}
                 >
-                  {sheetsLastSync ? (
-                    <>
-                      <span className="size-1.5 rounded-full bg-success animate-pulse" />
-                      Live
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="size-2.5 animate-spin" />
-                      Syncing…
-                    </>
-                  )}
-                </div>
+                  <span
+                    className={`size-1.5 rounded-full ${
+                      isSyncing
+                        ? "bg-amber-500 animate-ping"
+                        : sheetsEnabled && sheetsLastSync
+                        ? "bg-emerald-500 animate-pulse"
+                        : "bg-muted-foreground"
+                    }`}
+                  />
+                  <span>{isSyncing ? "Syncing…" : sheetsLastSync ? "Live" : "Offline"}</span>
+                </button>
               )}
+
               {/* Global Search */}
               <div className="relative" ref={searchRef}>
                 <Search className="size-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -374,11 +446,11 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
                   value={q}
                   onChange={(e) => { setQ(e.target.value); setShowSearch(true); }}
                   onFocus={() => setShowSearch(true)}
-                  placeholder={isMobileModule ? "Search..." : "Search..."}
-                  className="h-9 w-28 sm:w-48 lg:w-80 rounded-md border border-border bg-background pl-8 pr-2 sm:pr-3 text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
+                  placeholder="Search..."
+                  className="h-9 w-20 xs:w-28 sm:w-44 lg:w-80 rounded-md border border-border bg-background pl-8 pr-2 sm:pr-3 text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
                 />
                 {showSearch && searchResults.length > 0 && (
-                  <div className="absolute top-full mt-1 right-0 sm:left-0 w-[90vw] sm:w-80 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+                  <div className="absolute top-full mt-1 right-0 sm:left-0 w-[88vw] sm:w-80 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden">
                     {searchResults.map((r, i) => (
                       <button
                         key={i}
@@ -404,6 +476,29 @@ export function AppShell({ children, breadcrumb }: { children: ReactNode; breadc
                   </div>
                 )}
               </div>
+
+              {/* Refresh Button (Accessible & prominent on mobile interface & desktop) */}
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isSyncing}
+                className="relative size-9 rounded-md border border-border bg-surface hover:bg-accent grid place-items-center text-foreground transition-all active:scale-95 disabled:opacity-50 shrink-0 shadow-sm"
+                title={sheetsLastSync ? `Last synced: ${sheetsLastSync} · Tap to refresh` : "Refresh data from Google Sheets"}
+                aria-label="Refresh data"
+              >
+                <RefreshCw className={`size-4 ${isSyncing ? "animate-spin text-primary" : "text-foreground/80"}`} />
+                {sheetsUrl && sheetsEnabled && (
+                  <span
+                    className={`absolute top-1.5 right-1.5 size-1.5 rounded-full ${
+                      isSyncing
+                        ? "bg-amber-500 animate-ping"
+                        : sheetsLastSync
+                        ? "bg-emerald-500"
+                        : "bg-muted-foreground"
+                    }`}
+                  />
+                )}
+              </button>
 
               {/* Dark mode toggle (desktop) */}
               <button

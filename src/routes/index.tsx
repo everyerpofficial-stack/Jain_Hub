@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import {
   Users, TrendingUp, IndianRupee,
-  FileDown, AlertTriangle, Clock, Smartphone, CheckCircle2,
+  FileDown, AlertTriangle, Clock, Smartphone, CheckCircle2, RefreshCw,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -11,6 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, ProgressBar, SectionHeader, StatCard } from "@/components/ui-kit";
 import { downloadExcel, useStore, parseAppDate, parseAmount, isDateInRange } from "@/lib/store";
+import { triggerManualSync } from "@/lib/useRealtimeSync";
 import { useUi } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
@@ -33,6 +34,7 @@ function Dashboard() {
   const payments = useStore((s) => s.payments);
   const expenses = useStore((s) => s.expenses);
   const investments = useStore((s) => s.investments);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const {
     preset: filterPreset,
@@ -247,7 +249,41 @@ function Dashboard() {
             </span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <button
+            onClick={async () => {
+              if (isRefreshing) return;
+              setIsRefreshing(true);
+              try {
+                const ok = await triggerManualSync(true);
+                if (ok) {
+                  const time = new Date().toLocaleTimeString("en-IN", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: true,
+                  });
+                  toast.success("Dashboard data refreshed", {
+                    description: `Synced with Google Sheets at ${time}`,
+                  });
+                } else {
+                  toast.info("Offline or local data", {
+                    description: "Could not fetch updates from Google Sheets. Using local records.",
+                  });
+                }
+              } catch (err: any) {
+                toast.error("Failed to refresh", { description: err?.message || "An unexpected error occurred." });
+              } finally {
+                setIsRefreshing(false);
+              }
+            }}
+            disabled={isRefreshing}
+            className="h-9 px-3 rounded-md border border-border bg-surface text-sm inline-flex items-center gap-1.5 hover:bg-accent font-semibold transition-colors shadow-sm disabled:opacity-50"
+            title="Refresh dashboard data from Google Sheets"
+          >
+            <RefreshCw className={`size-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`} />
+            <span>Refresh</span>
+          </button>
           <button
             onClick={() => {
               const dataToExport = filteredCustomers.map((c) => ({
