@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter, Di
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
 import { useMobileStore, MobileSale, safeItems } from "@/lib/mobileStore";
-import { parseAppDate, isDateInRange } from "@/lib/store";
+import { parseAppDate, isDateInRange, VILLAGES } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 import { JAIN_LOGO_BASE64 } from "./-logoBase64";
 
@@ -1187,9 +1187,15 @@ function SalesPage() {
                   <input
                     value={village}
                     onChange={(e) => setVillage(e.target.value)}
-                    placeholder="e.g. Shirwal"
+                    placeholder="e.g. Katriya"
                     className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
+                    list="sales-village-options"
                   />
+                  <datalist id="sales-village-options">
+                    {VILLAGES.map((v) => (
+                      <option key={v} value={v} />
+                    ))}
+                  </datalist>
                 </label>
               </div>
 

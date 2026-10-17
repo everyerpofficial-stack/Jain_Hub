@@ -12,6 +12,58 @@ import {
 import { resetRealtimeSyncCache } from "./useRealtimeSync";
 import { splitByMethod, toOptionalNumber } from "./ledger";
 
+export const SMARTPHONE_BRANDS = [
+  "Samsung",
+  "Apple",
+  "Vivo",
+  "OPPO",
+  "Xiaomi",
+  "Redmi",
+  "POCO",
+  "Realme",
+  "OnePlus",
+  "Motorola",
+  "iQOO",
+  "Google Pixel",
+  "Nothing",
+  "CMF",
+  "Tecno",
+  "Infinix",
+  "itel",
+  "Lava",
+  "HMD",
+  "Nokia",
+  "ASUS",
+  "Sony",
+  "Huawei",
+  "Honor",
+  "Micromax",
+  "Karbonn",
+  "Jio",
+  "Ai+",
+  "China",
+  "Keypad",
+  "Others",
+];
+
+export const RAM_ROM_OPTIONS = [
+  "3/32 GB",
+  "3/64 GB",
+  "4/64 GB",
+  "4/128 GB",
+  "6/64 GB",
+  "6/128 GB",
+  "6/256 GB",
+  "8/64 GB",
+  "8/128 GB",
+  "8/256 GB",
+  "8/512 GB",
+  "12/256 GB",
+  "12/512 GB",
+  "16/256 GB",
+  "16/512 GB",
+];
+
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   "TV": [
     "Samsung", "LG", "Sony", "Mi / Xiaomi", "OnePlus", "Haier", "TCL", "Hisense",
@@ -32,24 +84,12 @@ export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   "Washing Machine": [
     "LG", "Samsung", "Whirlpool", "IFB", "Bosch", "Haier", "Godrej", "Panasonic", "Lloyd"
   ],
-  "Smartphones": [
-    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
-    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
-  ],
-  "SecondHandPhone": [
-    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
-    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
-  ],
-  "Second Hand Phone": [
-    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
-    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
-  ],
-  "Second Hand Phones": [
-    "Apple", "Samsung", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Poco",
-    "Motorola", "Nothing", "Nokia", "iQOO", "Google", "Techno", "Infinix", "Lava"
-  ],
+  "Smartphones": SMARTPHONE_BRANDS,
+  "SecondHandPhone": SMARTPHONE_BRANDS,
+  "Second Hand Phone": SMARTPHONE_BRANDS,
+  "Second Hand Phones": SMARTPHONE_BRANDS,
   "Basic Phones": [
-    "Nokia", "Samsung", "Lava", "Itel", "Micromax", "Jio", "Karbonn"
+    "Samsung", "Nokia", "Lava", "itel", "Micromax", "Karbonn", "Jio", "HMD", "Keypad", "China", "Others"
   ],
   "Tablets": [
     "Apple", "Samsung", "Lenovo", "Xiaomi", "Realme", "OnePlus", "Nokia", "Motorola"
@@ -79,9 +119,7 @@ export function formatCategoryName(cat?: string): string {
   return cat;
 }
 
-export const DEFAULT_BRANDS_FALLBACK = [
-  "Samsung", "Apple", "LG", "Sony", "OnePlus", "Vivo", "Oppo", "Xiaomi", "Realme", "Haier", "Whirlpool", "Godrej"
-];
+export const DEFAULT_BRANDS_FALLBACK = SMARTPHONE_BRANDS;
 
 export function getBrandsForCategory(category: string): string[] {
   if (!category) return DEFAULT_BRANDS_FALLBACK;

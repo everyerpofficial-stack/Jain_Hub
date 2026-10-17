@@ -86,6 +86,7 @@ function Select({
   label: string; value: string; onChange?: (v: string) => void;
   options: string[]; readOnly?: boolean;
 }) {
+  const displayOptions = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <label className="block">
       <span className="text-xs text-muted-foreground font-medium">{label}</span>
@@ -95,7 +96,7 @@ function Select({
         disabled={readOnly}
         className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:bg-muted/40"
       >
-        {options.map((o) => <option key={o}>{o}</option>)}
+        {displayOptions.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </label>
   );
@@ -172,9 +173,9 @@ function CustomerDialog() {
   }, [region, availableVillages]);
 
   // Mobile device
-  const [mobileBrand, setMobileBrand] = useState(Object.keys(MOBILE_BRANDS)[0] || "Apple");
+  const [mobileBrand, setMobileBrand] = useState(Object.keys(MOBILE_BRANDS)[0] || "Samsung");
   const [mobileModel, setMobileModel] = useState("");
-  const [ramRom, setRamRom] = useState("4GB/64GB");
+  const [ramRom, setRamRom] = useState(RAM_ROM_OPTIONS[2] || "4/64 GB");
   const [imei1, setImei1] = useState("");
   const [imei2, setImei2] = useState("");
 
@@ -197,7 +198,7 @@ function CustomerDialog() {
     if (open !== "customer") {
       setFirstName(""); setFatherName(""); setSurname(""); setMobile(""); setAadhaar("");
       setGuarantyName(""); setGuarantyMobile(""); setRegion(REGIONS[0]); setVillage(VILLAGES_BY_REGION[REGIONS[0]]?.[0] || "");
-      setMobileBrand(Object.keys(MOBILE_BRANDS)[0] || "Apple"); setRamRom("4GB/64GB"); setImei1(""); setImei2("");
+      setMobileBrand(Object.keys(MOBILE_BRANDS)[0] || "Samsung"); setRamRom(RAM_ROM_OPTIONS[2] || "4/64 GB"); setImei1(""); setImei2("");
       setPrice(""); setDeposit(""); setInterestRate("5"); setNoOfEmi("6");
       setBillDate(getTodayYmd());
       setEmiDate(getTodayYmd());

@@ -5,7 +5,7 @@ import { Plus, Download, Search, Eye, Edit, Trash2, Smartphone, Shield, Tag, Bar
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useMobileStore, MobileProduct, getBrandsForCategory, formatCategoryName } from "@/lib/mobileStore";
+import { useMobileStore, MobileProduct, getBrandsForCategory, formatCategoryName, RAM_ROM_OPTIONS } from "@/lib/mobileStore";
 
 export const Route = createFileRoute("/mobiles/products")({
   head: () => ({
@@ -164,10 +164,10 @@ function ProductFormDialog({
         setRamRomVal("7 kg");
         setColorVal("Top Load - Fully Automatic");
       } else if (category === "SecondHandPhone" || category === "Second Hand Phone") {
-        setRamRomVal("8GB/128GB");
+        setRamRomVal("8/128 GB");
         setColorVal("Good Condition");
       } else {
-        setRamRomVal("8GB/128GB");
+        setRamRomVal("8/128 GB");
         setColorVal("Default Color");
       }
     }
@@ -349,7 +349,7 @@ function ProductFormDialog({
                   onChange={(e) => setRamRomVal(e.target.value)}
                   className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
                 >
-                  {["4GB/64GB", "6GB/128GB", "8GB/128GB", "8GB/256GB", "12GB/256GB", "12GB/512GB", "16GB/512GB", "16GB/1TB"].map((rr) => (
+                  {(ramRomVal && !RAM_ROM_OPTIONS.includes(ramRomVal) ? [ramRomVal, ...RAM_ROM_OPTIONS] : RAM_ROM_OPTIONS).map((rr) => (
                     <option key={rr} value={rr}>{rr}</option>
                   ))}
                 </select>

@@ -5,7 +5,7 @@ import { Plus, Search, Receipt, CreditCard, Download, Calendar, ArrowUpRight, Ar
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
-import { useMobileStore, MobilePurchase, MobileSupplier, MobileProduct, safeItems, getBrandsForCategory } from "@/lib/mobileStore";
+import { useMobileStore, MobilePurchase, MobileSupplier, MobileProduct, safeItems, getBrandsForCategory, RAM_ROM_OPTIONS } from "@/lib/mobileStore";
 import { parseAppDate, isDateInRange } from "@/lib/store";
 import { FilterBar, useDateFilter } from "@/components/FilterBar";
 
@@ -634,9 +634,15 @@ function PurchaseFormDialog({ onClose, onPurchaseLogged }: { onClose: () => void
                   <input
                     value={quickSpec}
                     onChange={(e) => setQuickSpec(e.target.value)}
-                    placeholder="e.g. 32 Inch or 8GB/128GB"
+                    placeholder="e.g. 32 Inch or 8/128 GB"
                     className="mt-1 h-8 w-full rounded border border-border bg-surface px-2 focus:outline-none"
+                    list="quick-specs-ramrom"
                   />
+                  <datalist id="quick-specs-ramrom">
+                    {RAM_ROM_OPTIONS.map((rr) => (
+                      <option key={rr} value={rr} />
+                    ))}
+                  </datalist>
                 </label>
                 <label className="block">
                   <span className="font-semibold text-muted-foreground">Color / Type</span>

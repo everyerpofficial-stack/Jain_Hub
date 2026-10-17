@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Badge, Card, SectionHeader, StatCard } from "@/components/ui-kit";
 import { useMobileStore, MobileCustomer, MobileSale, safeItems } from "@/lib/mobileStore";
+import { VILLAGES } from "@/lib/store";
 import { CollectSalePaymentDialog } from "./sales";
 
 export const Route = createFileRoute("/mobiles/customers")({
@@ -489,9 +490,15 @@ function CustomerFormDialog({
               <input
                 value={village}
                 onChange={(e) => setVillage(e.target.value)}
-                placeholder="e.g. Shirwal"
+                placeholder="e.g. Katriya"
                 className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-3 text-sm focus:ring-2 focus:ring-ring/20 focus:outline-none"
+                list="customer-village-options"
               />
+              <datalist id="customer-village-options">
+                {VILLAGES.map((v) => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
             </label>
           </div>
 
